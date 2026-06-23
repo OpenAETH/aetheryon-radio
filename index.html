@@ -229,11 +229,19 @@ canvas {
 <script>
 // Read ?server= from URL
 const params = new URLSearchParams(location.search);
-let serverUrl = params.get('server') || 'ws://localhost:8000/listen';
-// Auto-fix http→ws
-if (serverUrl.startsWith('http://')) serverUrl = serverUrl.replace('http://','ws://');
-if (serverUrl.startsWith('https://')) serverUrl = serverUrl.replace('https://','wss://');
-if (!serverUrl.startsWith('ws')) serverUrl = 'ws://' + serverUrl;
+let serverUrl = params.get('server') || 'wss://1a38-186-128-227-250.ngrok-free.app/listen';
+
+// Normalize protocol — convert http(s) → ws(s), never double-prefix
+serverUrl = serverUrl.trim();
+if (serverUrl.startsWith('https://')) {
+  serverUrl = 'wss://' + serverUrl.slice(8);
+} else if (serverUrl.startsWith('http://')) {
+  serverUrl = 'ws://' + serverUrl.slice(7);
+} else if (!serverUrl.startsWith('ws://') && !serverUrl.startsWith('wss://')) {
+  // Bare host — pick secure if page is HTTPS
+  serverUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + serverUrl;
+}
+
 document.getElementById('server-input').value = serverUrl;
 
 let ws = null, audioCtx, analyser, sourceNode, gainNode;
@@ -382,8 +390,12 @@ document.getElementById('btn-listen').addEventListener('click', () => {
 
 document.getElementById('btn-set').addEventListener('click', () => {
   let v = document.getElementById('server-input').value.trim();
-  if (!v.startsWith('ws')) v = 'ws://' + v;
+  if (v.startsWith('https://'))       v = 'wss://' + v.slice(8);
+  else if (v.startsWith('http://'))   v = 'ws://'  + v.slice(7);
+  else if (!v.startsWith('ws://') && !v.startsWith('wss://'))
+    v = (location.protocol === 'https:' ? 'wss://' : 'ws://') + v;
   serverUrl = v;
+  document.getElementById('server-input').value = serverUrl;
   if (isListening) { disconnect(); initAudio(); connect(); }
 });
 
@@ -395,8 +407,11 @@ document.getElementById('vol').addEventListener('input', e => {
 // Poll listener count
 setInterval(async () => {
   try {
-    const base = serverUrl.replace('ws://','http://').replace('wss://','https://').replace('/listen','');
-    const r = await fetch(base+'/status');
+    let base = serverUrl;
+    if (base.startsWith('wss://'))      base = 'https://' + base.slice(6);
+    else if (base.startsWith('ws://'))  base = 'http://'  + base.slice(5);
+    base = base.replace(/\/listen\/?$/, '');
+    const r = await fetch(base + '/status');
     const d = await r.json();
     document.getElementById('count').textContent = d.listeners;
   } catch(_){}
