@@ -9,8 +9,15 @@ import logging
 from typing import Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 import uvicorn
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "ngrok-skip-browser-warning": "1",
+}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aetheryon-radio")
@@ -32,23 +39,27 @@ broadcast_stats = {"chunks_relayed": 0, "listeners_peak": 0}
 
 @app.get("/")
 async def root():
-    return {
+    return JSONResponse({
         "service": "AETHERYON Radio",
         "status": "online",
         "dj_online": dj_connected,
         "listeners": len(listeners),
         "stats": broadcast_stats,
-    }
+    }, headers=CORS_HEADERS)
 
 
 @app.get("/status")
 async def status():
-    return {
+    return JSONResponse({
         "dj_online": dj_connected,
         "listeners": len(listeners),
         "peak": broadcast_stats["listeners_peak"],
         "chunks_relayed": broadcast_stats["chunks_relayed"],
-    }
+    }, headers=CORS_HEADERS)
+
+@app.options("/status")
+async def status_options():
+    return JSONResponse({}, headers=CORS_HEADERS)
 
 
 @app.websocket("/broadcast")
