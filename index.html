@@ -107,7 +107,11 @@ canvas {
   transition:all .2s;
   margin-bottom:20px;
 }
+<<<<<<< HEAD
+.btn-listen:hover  { background:var(--cyan-dim); }
+=======
 .btn-listen:hover { background:var(--cyan-dim); }
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
 .btn-listen.active { border-color:var(--amber); color:var(--amber); }
 .vol-row {
   display:flex; align-items:center; gap:12px; margin-bottom:28px;
@@ -163,6 +167,33 @@ canvas {
 </div>
 
 <script>
+<<<<<<< HEAD
+// ── toWS: convierte cualquier string a wss:// o ws:// ──
+function toWS(raw) {
+  var s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('wss://') || s.startsWith('ws://')) return s;
+  if (s.startsWith('https://')) return 'wss://' + s.substring(8);
+  if (s.startsWith('http://'))  return 'ws://'  + s.substring(7);
+  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
+}
+
+// ── Leer ?server= del query string ──
+var rawParam  = new URLSearchParams(location.search).get('server') || '';
+var serverUrl = toWS(rawParam);
+document.getElementById('server-input').value = serverUrl;
+
+// ── Estado ──
+var ws = null, audioCtx = null, analyser = null, gainNode = null;
+var mediaSource = null, sourceBuffer = null;
+var isListening = false, sbReady = false;
+var queue = [], pingTimer = null;
+
+// ── Visualizador ──
+var canvas = document.getElementById('viz');
+var ctx2d  = canvas.getContext('2d');
+canvas.width  = canvas.offsetWidth || 340;
+=======
 // ─────────────────────────────────────────────────────────
 // CONFIG — read ?server= param, normalize to wss://
 // ─────────────────────────────────────────────────────────
@@ -204,11 +235,27 @@ var sbReady     = false;
 var canvas = document.getElementById('viz');
 var ctx    = canvas.getContext('2d');
 canvas.width  = canvas.offsetWidth || 320;
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
 canvas.height = 80;
 
 function drawViz() {
   requestAnimationFrame(drawViz);
   if (!analyser) {
+<<<<<<< HEAD
+    ctx2d.fillStyle = '#04040a';
+    ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  var d  = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(d);
+  ctx2d.fillStyle = 'rgba(4,4,10,0.4)';
+  ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+  var bw = canvas.width / d.length * 2.5;
+  for (var i = 0; i < d.length; i++) {
+    var h = (d[i] / 255) * canvas.height;
+    ctx2d.fillStyle = 'hsl(' + (170 + i / d.length * 30) + ',100%,' + (40 + d[i]/255*30) + '%)';
+    ctx2d.fillRect(i * bw, canvas.height - h, bw - 1, h);
+=======
     ctx.fillStyle = '#04040a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return;
@@ -224,10 +271,20 @@ function drawViz() {
     ctx.fillStyle = 'hsl(' + (170 + i / d.length * 30) + ',100%,' + (40 + d[i]/255*30) + '%)';
     ctx.fillRect(x, canvas.height - h, bw - 1, h);
     x += bw;
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
   }
 }
 drawViz();
 
+<<<<<<< HEAD
+// ── Status UI ──
+function setStatus(text, cls) {
+  document.getElementById('status-text').textContent = text;
+  document.getElementById('dot').className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+// ── Audio via MediaSource ──
+=======
 // ─────────────────────────────────────────────────────────
 // STATUS
 // ─────────────────────────────────────────────────────────
@@ -239,6 +296,7 @@ function setStatus(text, state) {
 // ─────────────────────────────────────────────────────────
 // AUDIO — MediaSource API
 // ─────────────────────────────────────────────────────────
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
@@ -248,6 +306,17 @@ function initAudio() {
   gainNode.connect(analyser);
   analyser.connect(audioCtx.destination);
 
+<<<<<<< HEAD
+  var audio      = new Audio();
+  audio.autoplay = true;
+  mediaSource    = new MediaSource();
+  audio.src      = URL.createObjectURL(mediaSource);
+
+  mediaSource.addEventListener('sourceopen', function () {
+    var mime = 'audio/webm;codecs=opus';
+    if (!MediaSource.isTypeSupported(mime)) { setStatus('CODEC NO SOPORTADO', ''); return; }
+    sourceBuffer      = mediaSource.addSourceBuffer(mime);
+=======
   var audio       = new Audio();
   audio.autoplay  = true;
   mediaSource     = new MediaSource();
@@ -260,12 +329,16 @@ function initAudio() {
       return;
     }
     sourceBuffer = mediaSource.addSourceBuffer(mime);
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
     sourceBuffer.mode = 'sequence';
     sourceBuffer.addEventListener('updateend', appendNext);
     sbReady = true;
     appendNext();
   });
 
+<<<<<<< HEAD
+  audioCtx.createMediaElementSource(audio).connect(gainNode);
+=======
   var srcNode = audioCtx.createMediaElementSource(audio);
   srcNode.connect(gainNode);
 }
@@ -273,21 +346,44 @@ function initAudio() {
 function enqueue(chunk) {
   queue.push(chunk);
   if (sbReady && !sourceBuffer.updating) appendNext();
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
 }
 
 function appendNext() {
   if (!queue.length || !sourceBuffer || sourceBuffer.updating) return;
   try {
     sourceBuffer.appendBuffer(queue.shift());
+<<<<<<< HEAD
+  } catch (e) {
+    if (sourceBuffer.buffered.length) {
+      var s = sourceBuffer.buffered.start(0);
+      var e2 = sourceBuffer.buffered.end(0);
+      if (e2 - s > 10) sourceBuffer.remove(s, s + 5);
+=======
   } catch(e) {
     if (sourceBuffer.buffered.length) {
       var s = sourceBuffer.buffered.start(0);
       var en = sourceBuffer.buffered.end(0);
       if (en - s > 10) sourceBuffer.remove(s, s + 5);
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
     }
   }
 }
 
+<<<<<<< HEAD
+// ── WebSocket ──
+function connect() {
+  var url = toWS(serverUrl);
+  if (!url) { setStatus('INGRESA URL DEL SERVIDOR', ''); return; }
+
+  setStatus('CONECTANDO…', '');
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = function () {
+    setStatus('CONECTADO — ESPERANDO DJ', 'connected');
+    pingTimer = setInterval(function () {
+=======
 // ─────────────────────────────────────────────────────────
 // WEBSOCKET
 // ─────────────────────────────────────────────────────────
@@ -311,10 +407,27 @@ function connect() {
     setStatus('CONNECTED — WAITING FOR DJ', 'connected');
     document.getElementById('count').textContent = '?';
     pingTimer = setInterval(function() {
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, 20000);
   };
 
+<<<<<<< HEAD
+  ws.onmessage = function (e) {
+    if (typeof e.data === 'string') return;
+    setStatus('EN VIVO', 'live');
+    queue.push(e.data);
+    if (sbReady && !sourceBuffer.updating) appendNext();
+  };
+
+  ws.onclose = function () {
+    setStatus('DESCONECTADO', '');
+    clearInterval(pingTimer);
+  };
+
+  ws.onerror = function () {
+    setStatus('ERROR DE CONEXIÓN', '');
+=======
   ws.onmessage = function(e) {
     if (typeof e.data === 'string') return;
     setStatus('ON AIR — LIVE', 'live');
@@ -329,6 +442,7 @@ function connect() {
 
   ws.onerror = function() {
     setStatus('CONNECTION ERROR', '');
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
   };
 }
 
@@ -339,6 +453,13 @@ function disconnect() {
   sourceBuffer = null; mediaSource = null; sbReady = false; queue = [];
 }
 
+<<<<<<< HEAD
+// ── Botón principal ──
+document.getElementById('btn-listen').addEventListener('click', function () {
+  if (!isListening) {
+    isListening = true;
+    this.textContent = '⏹ DESCONECTAR';
+=======
 // ─────────────────────────────────────────────────────────
 // UI EVENTS
 // ─────────────────────────────────────────────────────────
@@ -346,6 +467,7 @@ document.getElementById('btn-listen').addEventListener('click', function() {
   if (!isListening) {
     isListening = true;
     this.textContent = '⏹ DISCONNECT';
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
     this.classList.add('active');
     initAudio();
     connect();
@@ -358,14 +480,25 @@ document.getElementById('btn-listen').addEventListener('click', function() {
   }
 });
 
+<<<<<<< HEAD
+// ── Botón SET ──
+document.getElementById('btn-set').addEventListener('click', function () {
+  serverUrl = toWS(document.getElementById('server-input').value.trim());
+=======
 document.getElementById('btn-set').addEventListener('click', function() {
   var v = document.getElementById('server-input').value.trim();
   serverUrl = toWS(v);
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
   document.getElementById('server-input').value = serverUrl;
   if (isListening) { disconnect(); initAudio(); connect(); }
 });
 
+<<<<<<< HEAD
+// ── Volumen ──
+document.getElementById('vol').addEventListener('input', function () {
+=======
 document.getElementById('vol').addEventListener('input', function() {
+>>>>>>> aeee719f536aa0ee48c7260f4ab41ec46b27eabd
   if (gainNode) gainNode.gain.value = this.value;
   document.getElementById('vol-pct').textContent = Math.round(this.value * 100) + '%';
 });
