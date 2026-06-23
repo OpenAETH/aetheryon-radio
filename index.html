@@ -32,16 +32,13 @@ body {
   justify-content: center;
   overflow: hidden;
 }
-
 body::after {
   content:'';
-  position:fixed;inset:0;
+  position:fixed; inset:0;
   background: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,245,212,.012) 2px,rgba(0,245,212,.012) 4px);
   pointer-events:none;
   z-index:9999;
 }
-
-/* Ambient glow */
 .glow-ring {
   position:fixed;
   width:600px; height:600px;
@@ -53,13 +50,11 @@ body::after {
   animation: breathe 4s ease-in-out infinite;
 }
 @keyframes breathe {
-  0%,100%{transform:translate(-50%,-50%) scale(1);opacity:0.6}
-  50%{transform:translate(-50%,-50%) scale(1.2);opacity:1}
+  0%,100%{ transform:translate(-50%,-50%) scale(1); opacity:0.6 }
+  50%    { transform:translate(-50%,-50%) scale(1.2); opacity:1 }
 }
-
 .card {
-  position:relative;
-  z-index:1;
+  position:relative; z-index:1;
   background:var(--deep);
   border:1px solid var(--border);
   border-radius:4px;
@@ -67,7 +62,6 @@ body::after {
   text-align:center;
   width:min(420px,94vw);
 }
-
 .station-name {
   font-family: var(--display);
   font-size: 42px;
@@ -83,37 +77,22 @@ body::after {
   text-transform:uppercase;
   margin-bottom:32px;
 }
-
-/* VISUALIZER */
 canvas {
-  width:100%;
-  height:80px;
+  width:100%; height:80px;
   border-radius:2px;
   margin-bottom:24px;
+  display:block;
 }
-
-/* Status */
 .status-row {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  margin-bottom:28px;
-  font-size:11px;
-  letter-spacing:2px;
+  display:flex; align-items:center; justify-content:center;
+  gap:10px; margin-bottom:28px;
+  font-size:11px; letter-spacing:2px;
 }
-.status-dot {
-  width:8px;height:8px;
-  border-radius:50%;
-  background:var(--muted);
-}
-.status-dot.live { background:var(--red); animation:blink .8s infinite; box-shadow:0 0 8px var(--red); }
-.status-dot.connected { background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-
+.dot { width:8px; height:8px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+.dot.live      { background:var(--red);  animation:blink .8s infinite; box-shadow:0 0 8px var(--red); }
+.dot.connected { background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 #status-text { color:var(--muted); }
-
-/* Listen button */
 .btn-listen {
   width:100%;
   background:none;
@@ -129,132 +108,101 @@ canvas {
   margin-bottom:20px;
 }
 .btn-listen:hover { background:var(--cyan-dim); }
-.btn-listen.listening { border-color:var(--amber); color:var(--amber); }
-
-/* Volume */
+.btn-listen.active { border-color:var(--amber); color:var(--amber); }
 .vol-row {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  margin-bottom:28px;
+  display:flex; align-items:center; gap:12px; margin-bottom:28px;
 }
 .vol-label { font-size:9px; letter-spacing:2px; color:var(--muted); white-space:nowrap; }
 #vol {
-  -webkit-appearance:none;
-  flex:1;height:3px;
-  background:var(--border);
-  border-radius:2px;
-  outline:none;
-  cursor:pointer;
+  -webkit-appearance:none; flex:1; height:3px;
+  background:var(--border); border-radius:2px; outline:none; cursor:pointer;
 }
 #vol::-webkit-slider-thumb {
-  -webkit-appearance:none;
-  width:14px;height:14px;
-  border-radius:50%;
-  background:var(--cyan);
-  box-shadow:0 0 6px var(--cyan);
+  -webkit-appearance:none; width:14px; height:14px;
+  border-radius:50%; background:var(--cyan); box-shadow:0 0 6px var(--cyan);
 }
-
-/* Server config */
-.server-row {
-  display:flex;
-  gap:8px;
-  align-items:center;
-}
+.server-row { display:flex; gap:8px; align-items:center; }
 .server-row input {
-  flex:1;
-  background:var(--surface);
-  border:1px solid var(--border);
-  color:var(--text);
-  font-family:var(--mono);
-  font-size:10px;
-  padding:8px 10px;
-  border-radius:2px;
-  outline:none;
+  flex:1; background:var(--surface);
+  border:1px solid var(--border); color:var(--text);
+  font-family:var(--mono); font-size:10px;
+  padding:8px 10px; border-radius:2px; outline:none;
 }
 .server-row input:focus { border-color:var(--cyan); }
 .btn-mini {
-  background:none;
-  border:1px solid var(--border);
-  color:var(--muted);
-  font-family:var(--mono);
-  font-size:9px;
-  letter-spacing:1px;
-  padding:8px 10px;
-  cursor:pointer;
-  border-radius:2px;
-  white-space:nowrap;
+  background:none; border:1px solid var(--border); color:var(--muted);
+  font-family:var(--mono); font-size:9px; letter-spacing:1px;
+  padding:8px 10px; cursor:pointer; border-radius:2px; white-space:nowrap;
 }
 .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
-
-.listener-count {
-  margin-top:16px;
-  font-size:10px;
-  color:var(--muted);
-  letter-spacing:2px;
-}
+.listener-count { margin-top:16px; font-size:10px; color:var(--muted); letter-spacing:2px; }
 .listener-count span { color:var(--cyan); }
 </style>
 </head>
 <body>
 <div class="glow-ring"></div>
-
 <div class="card">
   <div class="station-name">AETHERYON</div>
   <div class="station-sub">Online Radio</div>
-
   <canvas id="viz"></canvas>
-
   <div class="status-row">
-    <div class="status-dot" id="dot"></div>
+    <div class="dot" id="dot"></div>
     <span id="status-text">DISCONNECTED</span>
   </div>
-
   <button class="btn-listen" id="btn-listen">▶ TUNE IN</button>
-
   <div class="vol-row">
     <span class="vol-label">VOL</span>
     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
     <span class="vol-label" id="vol-pct">80%</span>
   </div>
-
   <div class="server-row">
-    <input type="text" id="server-input" placeholder="ws://localhost:8000/listen">
+    <input type="text" id="server-input" placeholder="wss://host:port/listen">
     <button class="btn-mini" id="btn-set">SET</button>
   </div>
-
-  <div class="listener-count">Oyentes conectados: <span id="count">—</span></div>
+  <div class="listener-count">Oyentes: <span id="count">—</span></div>
 </div>
 
 <script>
-// ── Normalize any string into a valid ws:// or wss:// URL ──────────────────
-function normalizeWS(raw) {
-  let s = (raw || '').trim();
-  try {
-    const u = new URL(s);
-    if (u.protocol === 'ws:' || u.protocol === 'wss:') return s;
-    if (u.protocol === 'https:') return 'wss://' + s.slice('https://'.length);
-    if (u.protocol === 'http:')  return 'ws://'  + s.slice('http://'.length);
-  } catch(_) {}
+// ─────────────────────────────────────────────────────────
+// CONFIG — read ?server= param, normalize to wss://
+// ─────────────────────────────────────────────────────────
+function toWS(raw) {
+  var s = String(raw || '').trim();
+  if (!s) return '';
+  // Already correct
+  if (s.startsWith('wss://') || s.startsWith('ws://')) return s;
+  // https / http
+  if (s.startsWith('https://')) return 'wss://' + s.substring(8);
+  if (s.startsWith('http://'))  return 'ws://'  + s.substring(7);
+  // Bare host
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
 }
 
-// Read ?server= from URL (URLSearchParams auto-decodes percent-encoding)
-const params = new URLSearchParams(location.search);
-const rawServer = params.get('server') || 'wss://1a38-186-128-227-250.ngrok-free.app/listen';
-let serverUrl = normalizeWS(rawServer);
+var params    = new URLSearchParams(location.search);
+var serverUrl = toWS(params.get('server') || '');
 
+// Show in input
 document.getElementById('server-input').value = serverUrl;
 
-let ws = null, audioCtx, analyser, sourceNode, gainNode;
-let mediaSource, sourceBuffer, isListening = false;
-let pingInterval;
-const queue = [];
-let sbReady = false;
+// ─────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────
+var ws          = null;
+var audioCtx    = null;
+var analyser    = null;
+var gainNode    = null;
+var mediaSource = null;
+var sourceBuffer= null;
+var isListening = false;
+var pingTimer   = null;
+var queue       = [];
+var sbReady     = false;
 
-// VIZ
-const canvas = document.getElementById('viz');
-const ctx    = canvas.getContext('2d');
+// ─────────────────────────────────────────────────────────
+// VISUALIZER
+// ─────────────────────────────────────────────────────────
+var canvas = document.getElementById('viz');
+var ctx    = canvas.getContext('2d');
 canvas.width  = canvas.offsetWidth || 320;
 canvas.height = 80;
 
@@ -262,66 +210,37 @@ function drawViz() {
   requestAnimationFrame(drawViz);
   if (!analyser) {
     ctx.fillStyle = '#04040a';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  const d = new Uint8Array(analyser.frequencyBinCount);
+  var d = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(d);
-  ctx.fillStyle='rgba(4,4,10,.4)';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  const bw = canvas.width/d.length*2.5;
-  let x=0;
-  for(let i=0;i<d.length;i++){
-    const h=(d[i]/255)*canvas.height;
-    ctx.fillStyle=`hsl(${170+i/d.length*30},100%,${40+d[i]/255*30}%)`;
-    ctx.fillRect(x,canvas.height-h,bw-1,h);
-    x+=bw;
+  ctx.fillStyle = 'rgba(4,4,10,0.4)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  var bw = canvas.width / d.length * 2.5;
+  var x  = 0;
+  for (var i = 0; i < d.length; i++) {
+    var h = (d[i] / 255) * canvas.height;
+    ctx.fillStyle = 'hsl(' + (170 + i / d.length * 30) + ',100%,' + (40 + d[i]/255*30) + '%)';
+    ctx.fillRect(x, canvas.height - h, bw - 1, h);
+    x += bw;
   }
 }
 drawViz();
 
+// ─────────────────────────────────────────────────────────
 // STATUS
+// ─────────────────────────────────────────────────────────
 function setStatus(text, state) {
   document.getElementById('status-text').textContent = text;
-  const dot = document.getElementById('dot');
-  dot.className = 'status-dot ' + (state||'');
+  document.getElementById('dot').className = 'dot' + (state ? ' ' + state : '');
 }
 
-// CONNECT
-function connect() {
-  serverUrl = normalizeWS(serverUrl); // final safety check
-  ws = new WebSocket(serverUrl);
-  ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => {
-    setStatus('CONNECTED — WAITING FOR DJ', 'connected');
-    pingInterval = setInterval(() => {
-      if(ws.readyState===WebSocket.OPEN) ws.send('ping');
-    }, 15000);
-  };
-
-  ws.onmessage = e => {
-    if (typeof e.data === 'string') return; // pong etc.
-    setStatus('ON AIR — RECEIVING', 'live');
-    document.getElementById('dot').className = 'status-dot live';
-    enqueue(e.data);
-  };
-
-  ws.onclose = () => {
-    setStatus('DISCONNECTED', '');
-    clearInterval(pingInterval);
-  };
-  ws.onerror = () => setStatus('CONNECTION ERROR', '');
-}
-
-function disconnect() {
-  if (ws) ws.close();
-  if (audioCtx) { audioCtx.close(); audioCtx=null; }
-}
-
-// AUDIO via MediaSource
+// ─────────────────────────────────────────────────────────
+// AUDIO — MediaSource API
+// ─────────────────────────────────────────────────────────
 function initAudio() {
-  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   gainNode = audioCtx.createGain();
@@ -329,15 +248,13 @@ function initAudio() {
   gainNode.connect(analyser);
   analyser.connect(audioCtx.destination);
 
-  const audio = new Audio();
-  audio.autoplay = true;
-  audio.controls = false;
+  var audio       = new Audio();
+  audio.autoplay  = true;
+  mediaSource     = new MediaSource();
+  audio.src       = URL.createObjectURL(mediaSource);
 
-  mediaSource = new MediaSource();
-  audio.src = URL.createObjectURL(mediaSource);
-
-  mediaSource.addEventListener('sourceopen', () => {
-    const mime = 'audio/webm;codecs=opus';
+  mediaSource.addEventListener('sourceopen', function() {
+    var mime = 'audio/webm;codecs=opus';
     if (!MediaSource.isTypeSupported(mime)) {
       setStatus('CODEC NOT SUPPORTED', '');
       return;
@@ -349,8 +266,8 @@ function initAudio() {
     appendNext();
   });
 
-  sourceNode = audioCtx.createMediaElementSource(audio);
-  sourceNode.connect(gainNode);
+  var srcNode = audioCtx.createMediaElementSource(audio);
+  srcNode.connect(gainNode);
 }
 
 function enqueue(chunk) {
@@ -359,410 +276,99 @@ function enqueue(chunk) {
 }
 
 function appendNext() {
-  if (!queue.length || sourceBuffer.updating) return;
+  if (!queue.length || !sourceBuffer || sourceBuffer.updating) return;
   try {
     sourceBuffer.appendBuffer(queue.shift());
   } catch(e) {
-    // Buffer overflow — drop old data
     if (sourceBuffer.buffered.length) {
-      const start = sourceBuffer.buffered.start(0);
-      const end   = sourceBuffer.buffered.end(0);
-      if (end - start > 10) {
-        sourceBuffer.remove(start, start + 5);
-      }
+      var s = sourceBuffer.buffered.start(0);
+      var en = sourceBuffer.buffered.end(0);
+      if (en - s > 10) sourceBuffer.remove(s, s + 5);
     }
   }
 }
 
-// BTN
-document.getElementById('btn-listen').addEventListener('click', () => {
-  if (!isListening) {
-    isListening = true;
-    document.getElementById('btn-listen').textContent = '⏹ DISCONNECT';
-    document.getElementById('btn-listen').classList.add('listening');
-    initAudio();
-    connect();
-  } else {
-    isListening = false;
-    document.getElementById('btn-listen').textContent = '▶ TUNE IN';
-    document.getElementById('btn-listen').classList.remove('listening');
-    disconnect();
-    setStatus('DISCONNECTED','');
-  }
-});
-
-document.getElementById('btn-set').addEventListener('click', () => {
-  const v = document.getElementById('server-input').value.trim();
-  serverUrl = normalizeWS(v);
-  document.getElementById('server-input').value = serverUrl;
-  if (isListening) { disconnect(); initAudio(); connect(); }
-});
-
-document.getElementById('vol').addEventListener('input', e => {
-  if (gainNode) gainNode.gain.value = e.target.value;
-  document.getElementById('vol-pct').textContent = Math.round(e.target.value*100)+'%';
-});
-
-// Poll listener count via WebSocket ping (avoids CORS on ngrok)
-// Status fetch disabled — WS connection is the source of truth
-setInterval(() => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send('ping');
-  }
-}, 15000);
-</script>
-</body>
-</html>  width:min(420px,94vw);
-}
-
-.station-name {
-  font-family: var(--display);
-  font-size: 42px;
-  letter-spacing: 6px;
-  color: var(--cyan);
-  text-shadow: 0 0 30px var(--cyan);
-  margin-bottom:6px;
-}
-.station-sub {
-  font-size:10px;
-  letter-spacing:4px;
-  color:var(--muted);
-  text-transform:uppercase;
-  margin-bottom:32px;
-}
-
-/* VISUALIZER */
-canvas {
-  width:100%;
-  height:80px;
-  border-radius:2px;
-  margin-bottom:24px;
-}
-
-/* Status */
-.status-row {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  margin-bottom:28px;
-  font-size:11px;
-  letter-spacing:2px;
-}
-.status-dot {
-  width:8px;height:8px;
-  border-radius:50%;
-  background:var(--muted);
-}
-.status-dot.live { background:var(--red); animation:blink .8s infinite; box-shadow:0 0 8px var(--red); }
-.status-dot.connected { background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-
-#status-text { color:var(--muted); }
-
-/* Listen button */
-.btn-listen {
-  width:100%;
-  background:none;
-  border:2px solid var(--cyan);
-  color:var(--cyan);
-  font-family:var(--display);
-  font-size:22px;
-  letter-spacing:4px;
-  padding:16px;
-  cursor:pointer;
-  border-radius:2px;
-  transition:all .2s;
-  margin-bottom:20px;
-}
-.btn-listen:hover { background:var(--cyan-dim); }
-.btn-listen.listening { border-color:var(--amber); color:var(--amber); }
-
-/* Volume */
-.vol-row {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  margin-bottom:28px;
-}
-.vol-label { font-size:9px; letter-spacing:2px; color:var(--muted); white-space:nowrap; }
-#vol {
-  -webkit-appearance:none;
-  flex:1;height:3px;
-  background:var(--border);
-  border-radius:2px;
-  outline:none;
-  cursor:pointer;
-}
-#vol::-webkit-slider-thumb {
-  -webkit-appearance:none;
-  width:14px;height:14px;
-  border-radius:50%;
-  background:var(--cyan);
-  box-shadow:0 0 6px var(--cyan);
-}
-
-/* Server config */
-.server-row {
-  display:flex;
-  gap:8px;
-  align-items:center;
-}
-.server-row input {
-  flex:1;
-  background:var(--surface);
-  border:1px solid var(--border);
-  color:var(--text);
-  font-family:var(--mono);
-  font-size:10px;
-  padding:8px 10px;
-  border-radius:2px;
-  outline:none;
-}
-.server-row input:focus { border-color:var(--cyan); }
-.btn-mini {
-  background:none;
-  border:1px solid var(--border);
-  color:var(--muted);
-  font-family:var(--mono);
-  font-size:9px;
-  letter-spacing:1px;
-  padding:8px 10px;
-  cursor:pointer;
-  border-radius:2px;
-  white-space:nowrap;
-}
-.btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
-
-.listener-count {
-  margin-top:16px;
-  font-size:10px;
-  color:var(--muted);
-  letter-spacing:2px;
-}
-.listener-count span { color:var(--cyan); }
-</style>
-</head>
-<body>
-<div class="glow-ring"></div>
-
-<div class="card">
-  <div class="station-name">AETHERYON</div>
-  <div class="station-sub">Online Radio</div>
-
-  <canvas id="viz"></canvas>
-
-  <div class="status-row">
-    <div class="status-dot" id="dot"></div>
-    <span id="status-text">DISCONNECTED</span>
-  </div>
-
-  <button class="btn-listen" id="btn-listen">▶ TUNE IN</button>
-
-  <div class="vol-row">
-    <span class="vol-label">VOL</span>
-    <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
-    <span class="vol-label" id="vol-pct">80%</span>
-  </div>
-
-  <div class="server-row">
-    <input type="text" id="server-input" placeholder="ws://localhost:8000/listen">
-    <button class="btn-mini" id="btn-set">SET</button>
-  </div>
-
-  <div class="listener-count">Oyentes conectados: <span id="count">—</span></div>
-</div>
-
-<script>
-// Read ?server= from URL
-const params = new URLSearchParams(location.search);
-let serverUrl = params.get('server') || 'wss://1a38-186-128-227-250.ngrok-free.app/listen';
-
-// Normalize protocol — convert http(s) → ws(s), never double-prefix
-serverUrl = serverUrl.trim();
-if (serverUrl.startsWith('https://')) {
-  serverUrl = 'wss://' + serverUrl.slice(8);
-} else if (serverUrl.startsWith('http://')) {
-  serverUrl = 'ws://' + serverUrl.slice(7);
-} else if (!serverUrl.startsWith('ws://') && !serverUrl.startsWith('wss://')) {
-  // Bare host — pick secure if page is HTTPS
-  serverUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + serverUrl;
-}
-
-document.getElementById('server-input').value = serverUrl;
-
-let ws = null, audioCtx, analyser, sourceNode, gainNode;
-let mediaSource, sourceBuffer, isListening = false;
-let pingInterval;
-const queue = [];
-let sbReady = false;
-
-// VIZ
-const canvas = document.getElementById('viz');
-const ctx    = canvas.getContext('2d');
-canvas.width  = canvas.offsetWidth || 320;
-canvas.height = 80;
-
-function drawViz() {
-  requestAnimationFrame(drawViz);
-  if (!analyser) {
-    ctx.fillStyle = '#04040a';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+// ─────────────────────────────────────────────────────────
+// WEBSOCKET
+// ─────────────────────────────────────────────────────────
+function connect() {
+  if (!serverUrl) {
+    setStatus('NO SERVER URL', '');
     return;
   }
-  const d = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(d);
-  ctx.fillStyle='rgba(4,4,10,.4)';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-  const bw = canvas.width/d.length*2.5;
-  let x=0;
-  for(let i=0;i<d.length;i++){
-    const h=(d[i]/255)*canvas.height;
-    ctx.fillStyle=`hsl(${170+i/d.length*30},100%,${40+d[i]/255*30}%)`;
-    ctx.fillRect(x,canvas.height-h,bw-1,h);
-    x+=bw;
+  // Final safety — ensure wss on https page
+  var url = toWS(serverUrl);
+  if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+    setStatus('INVALID URL', '');
+    return;
   }
-}
-drawViz();
 
-// STATUS
-function setStatus(text, state) {
-  document.getElementById('status-text').textContent = text;
-  const dot = document.getElementById('dot');
-  dot.className = 'status-dot ' + (state||'');
-}
-
-// CONNECT
-function connect() {
-  ws = new WebSocket(serverUrl);
+  setStatus('CONNECTING…', '');
+  ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
-  ws.onopen = () => {
+  ws.onopen = function() {
     setStatus('CONNECTED — WAITING FOR DJ', 'connected');
-    pingInterval = setInterval(() => {
-      if(ws.readyState===WebSocket.OPEN) ws.send('ping');
-    }, 15000);
+    document.getElementById('count').textContent = '?';
+    pingTimer = setInterval(function() {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 20000);
   };
 
-  ws.onmessage = e => {
-    if (typeof e.data === 'string') return; // pong etc.
-    setStatus('ON AIR — RECEIVING', 'live');
-    document.getElementById('dot').className = 'status-dot live';
+  ws.onmessage = function(e) {
+    if (typeof e.data === 'string') return;
+    setStatus('ON AIR — LIVE', 'live');
     enqueue(e.data);
   };
 
-  ws.onclose = () => {
+  ws.onclose = function() {
     setStatus('DISCONNECTED', '');
-    clearInterval(pingInterval);
+    clearInterval(pingTimer);
+    document.getElementById('count').textContent = '—';
   };
-  ws.onerror = () => setStatus('CONNECTION ERROR', '');
+
+  ws.onerror = function() {
+    setStatus('CONNECTION ERROR', '');
+  };
 }
 
 function disconnect() {
-  if (ws) ws.close();
-  if (audioCtx) { audioCtx.close(); audioCtx=null; }
+  clearInterval(pingTimer);
+  if (ws) { ws.close(); ws = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; analyser = null; }
+  sourceBuffer = null; mediaSource = null; sbReady = false; queue = [];
 }
 
-// AUDIO via MediaSource
-function initAudio() {
-  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 256;
-  gainNode = audioCtx.createGain();
-  gainNode.gain.value = parseFloat(document.getElementById('vol').value);
-  gainNode.connect(analyser);
-  analyser.connect(audioCtx.destination);
-
-  const audio = new Audio();
-  audio.autoplay = true;
-  audio.controls = false;
-
-  mediaSource = new MediaSource();
-  audio.src = URL.createObjectURL(mediaSource);
-
-  mediaSource.addEventListener('sourceopen', () => {
-    const mime = 'audio/webm;codecs=opus';
-    if (!MediaSource.isTypeSupported(mime)) {
-      setStatus('CODEC NOT SUPPORTED', '');
-      return;
-    }
-    sourceBuffer = mediaSource.addSourceBuffer(mime);
-    sourceBuffer.mode = 'sequence';
-    sourceBuffer.addEventListener('updateend', appendNext);
-    sbReady = true;
-    appendNext();
-  });
-
-  sourceNode = audioCtx.createMediaElementSource(audio);
-  sourceNode.connect(gainNode);
-}
-
-function enqueue(chunk) {
-  queue.push(chunk);
-  if (sbReady && !sourceBuffer.updating) appendNext();
-}
-
-function appendNext() {
-  if (!queue.length || sourceBuffer.updating) return;
-  try {
-    sourceBuffer.appendBuffer(queue.shift());
-  } catch(e) {
-    // Buffer overflow — drop old data
-    if (sourceBuffer.buffered.length) {
-      const start = sourceBuffer.buffered.start(0);
-      const end   = sourceBuffer.buffered.end(0);
-      if (end - start > 10) {
-        sourceBuffer.remove(start, start + 5);
-      }
-    }
-  }
-}
-
-// BTN
-document.getElementById('btn-listen').addEventListener('click', () => {
+// ─────────────────────────────────────────────────────────
+// UI EVENTS
+// ─────────────────────────────────────────────────────────
+document.getElementById('btn-listen').addEventListener('click', function() {
   if (!isListening) {
     isListening = true;
-    document.getElementById('btn-listen').textContent = '⏹ DISCONNECT';
-    document.getElementById('btn-listen').classList.add('listening');
+    this.textContent = '⏹ DISCONNECT';
+    this.classList.add('active');
     initAudio();
     connect();
   } else {
     isListening = false;
-    document.getElementById('btn-listen').textContent = '▶ TUNE IN';
-    document.getElementById('btn-listen').classList.remove('listening');
+    this.textContent = '▶ TUNE IN';
+    this.classList.remove('active');
     disconnect();
-    setStatus('DISCONNECTED','');
+    setStatus('DISCONNECTED', '');
   }
 });
 
-document.getElementById('btn-set').addEventListener('click', () => {
-  let v = document.getElementById('server-input').value.trim();
-  if (v.startsWith('https://'))       v = 'wss://' + v.slice(8);
-  else if (v.startsWith('http://'))   v = 'ws://'  + v.slice(7);
-  else if (!v.startsWith('ws://') && !v.startsWith('wss://'))
-    v = (location.protocol === 'https:' ? 'wss://' : 'ws://') + v;
-  serverUrl = v;
+document.getElementById('btn-set').addEventListener('click', function() {
+  var v = document.getElementById('server-input').value.trim();
+  serverUrl = toWS(v);
   document.getElementById('server-input').value = serverUrl;
   if (isListening) { disconnect(); initAudio(); connect(); }
 });
 
-document.getElementById('vol').addEventListener('input', e => {
-  if (gainNode) gainNode.gain.value = e.target.value;
-  document.getElementById('vol-pct').textContent = Math.round(e.target.value*100)+'%';
+document.getElementById('vol').addEventListener('input', function() {
+  if (gainNode) gainNode.gain.value = this.value;
+  document.getElementById('vol-pct').textContent = Math.round(this.value * 100) + '%';
 });
-
-// Poll listener count
-setInterval(async () => {
-  try {
-    let base = serverUrl;
-    if (base.startsWith('wss://'))      base = 'https://' + base.slice(6);
-    else if (base.startsWith('ws://'))  base = 'http://'  + base.slice(5);
-    base = base.replace(/\/listen\/?$/, '');
-    const r = await fetch(base + '/status');
-    const d = await r.json();
-    document.getElementById('count').textContent = d.listeners;
-  } catch(_){}
-}, 5000);
 </script>
 </body>
 </html>
