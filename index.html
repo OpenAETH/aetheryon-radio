@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AETHERYON RADIO — LISTEN</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #04040a;
+  --deep: #080814;
+  --surface: #0e0e1f;
+  --border: #1e1e42;
+  --cyan: #00f5d4;
+  --cyan-dim: #00f5d411;
+  --red: #ff3b5c;
+  --amber: #ffb830;
+  --muted: #5a5a8a;
+  --text: #e8e8ff;
+  --mono: 'Space Mono', monospace;
+  --display: 'Bebas Neue', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--mono);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+body::after {
+  content:'';
+  position:fixed;inset:0;
+  background: repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,245,212,.012) 2px,rgba(0,245,212,.012) 4px);
+  pointer-events:none;
+  z-index:9999;
+}
+
+/* Ambient glow */
+.glow-ring {
+  position:fixed;
+  width:600px; height:600px;
+  border-radius:50%;
+  background: radial-gradient(circle, rgba(0,245,212,.06) 0%, transparent 70%);
+  top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+  animation: breathe 4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,100%{transform:translate(-50%,-50%) scale(1);opacity:0.6}
+  50%{transform:translate(-50%,-50%) scale(1.2);opacity:1}
+}
+
+.card {
+  position:relative;
+  z-index:1;
+  background:var(--deep);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:40px 48px;
+  text-align:center;
+  width:min(420px,94vw);
+}
+
+.station-name {
+  font-family: var(--display);
+  font-size: 42px;
+  letter-spacing: 6px;
+  color: var(--cyan);
+  text-shadow: 0 0 30px var(--cyan);
+  margin-bottom:6px;
+}
+.station-sub {
+  font-size:10px;
+  letter-spacing:4px;
+  color:var(--muted);
+  text-transform:uppercase;
+  margin-bottom:32px;
+}
+
+/* VISUALIZER */
+canvas {
+  width:100%;
+  height:80px;
+  border-radius:2px;
+  margin-bottom:24px;
+}
+
+/* Status */
+.status-row {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:28px;
+  font-size:11px;
+  letter-spacing:2px;
+}
+.status-dot {
+  width:8px;height:8px;
+  border-radius:50%;
+  background:var(--muted);
+}
+.status-dot.live { background:var(--red); animation:blink .8s infinite; box-shadow:0 0 8px var(--red); }
+.status-dot.connected { background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+#status-text { color:var(--muted); }
+
+/* Listen button */
+.btn-listen {
+  width:100%;
+  background:none;
+  border:2px solid var(--cyan);
+  color:var(--cyan);
+  font-family:var(--display);
+  font-size:22px;
+  letter-spacing:4px;
+  padding:16px;
+  cursor:pointer;
+  border-radius:2px;
+  transition:all .2s;
+  margin-bottom:20px;
+}
+.btn-listen:hover { background:var(--cyan-dim); }
+.btn-listen.listening { border-color:var(--amber); color:var(--amber); }
+
+/* Volume */
+.vol-row {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:28px;
+}
+.vol-label { font-size:9px; letter-spacing:2px; color:var(--muted); white-space:nowrap; }
+#vol {
+  -webkit-appearance:none;
+  flex:1;height:3px;
+  background:var(--border);
+  border-radius:2px;
+  outline:none;
+  cursor:pointer;
+}
+#vol::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:14px;height:14px;
+  border-radius:50%;
+  background:var(--cyan);
+  box-shadow:0 0 6px var(--cyan);
+}
+
+/* Server config */
+.server-row {
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.server-row input {
+  flex:1;
+  background:var(--surface);
+  border:1px solid var(--border);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:10px;
+  padding:8px 10px;
+  border-radius:2px;
+  outline:none;
+}
+.server-row input:focus { border-color:var(--cyan); }
+.btn-mini {
+  background:none;
+  border:1px solid var(--border);
+  color:var(--muted);
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:1px;
+  padding:8px 10px;
+  cursor:pointer;
+  border-radius:2px;
+  white-space:nowrap;
+}
+.btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
+
+.listener-count {
+  margin-top:16px;
+  font-size:10px;
+  color:var(--muted);
+  letter-spacing:2px;
+}
+.listener-count span { color:var(--cyan); }
+</style>
+</head>
+<body>
+<div class="glow-ring"></div>
+
+<div class="card">
+  <div class="station-name">AETHERYON</div>
+  <div class="station-sub">Online Radio</div>
+
+  <canvas id="viz"></canvas>
+
+  <div class="status-row">
+    <div class="status-dot" id="dot"></div>
+    <span id="status-text">DISCONNECTED</span>
+  </div>
+
+  <button class="btn-listen" id="btn-listen">▶ TUNE IN</button>
+
+  <div class="vol-row">
+    <span class="vol-label">VOL</span>
+    <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
+    <span class="vol-label" id="vol-pct">80%</span>
+  </div>
+
+  <div class="server-row">
+    <input type="text" id="server-input" placeholder="ws://localhost:8000/listen">
+    <button class="btn-mini" id="btn-set">SET</button>
+  </div>
+
+  <div class="listener-count">Oyentes conectados: <span id="count">—</span></div>
+</div>
+
+<script>
+// Read ?server= from URL
+const params = new URLSearchParams(location.search);
+let serverUrl = params.get('server') || 'wss://1a38-186-128-227-250.ngrok-free.app/listen';
+
+// Normalize protocol — convert http(s) → ws(s), never double-prefix
+serverUrl = serverUrl.trim();
+if (serverUrl.startsWith('https://')) {
+  serverUrl = 'wss://' + serverUrl.slice(8);
+} else if (serverUrl.startsWith('http://')) {
+  serverUrl = 'ws://' + serverUrl.slice(7);
+} else if (!serverUrl.startsWith('ws://') && !serverUrl.startsWith('wss://')) {
+  // Bare host — pick secure if page is HTTPS
+  serverUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + serverUrl;
+}
+
+document.getElementById('server-input').value = serverUrl;
+
+let ws = null, audioCtx, analyser, sourceNode, gainNode;
+let mediaSource, sourceBuffer, isListening = false;
+let pingInterval;
+const queue = [];
+let sbReady = false;
+
+// VIZ
+const canvas = document.getElementById('viz');
+const ctx    = canvas.getContext('2d');
+canvas.width  = canvas.offsetWidth || 320;
+canvas.height = 80;
+
+function drawViz() {
+  requestAnimationFrame(drawViz);
+  if (!analyser) {
+    ctx.fillStyle = '#04040a';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  const d = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(d);
+  ctx.fillStyle='rgba(4,4,10,.4)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  const bw = canvas.width/d.length*2.5;
+  let x=0;
+  for(let i=0;i<d.length;i++){
+    const h=(d[i]/255)*canvas.height;
+    ctx.fillStyle=`hsl(${170+i/d.length*30},100%,${40+d[i]/255*30}%)`;
+    ctx.fillRect(x,canvas.height-h,bw-1,h);
+    x+=bw;
+  }
+}
+drawViz();
+
+// STATUS
+function setStatus(text, state) {
+  document.getElementById('status-text').textContent = text;
+  const dot = document.getElementById('dot');
+  dot.className = 'status-dot ' + (state||'');
+}
+
+// CONNECT
+function connect() {
+  ws = new WebSocket(serverUrl);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    setStatus('CONNECTED — WAITING FOR DJ', 'connected');
+    pingInterval = setInterval(() => {
+      if(ws.readyState===WebSocket.OPEN) ws.send('ping');
+    }, 15000);
+  };
+
+  ws.onmessage = e => {
+    if (typeof e.data === 'string') return; // pong etc.
+    setStatus('ON AIR — RECEIVING', 'live');
+    document.getElementById('dot').className = 'status-dot live';
+    enqueue(e.data);
+  };
+
+  ws.onclose = () => {
+    setStatus('DISCONNECTED', '');
+    clearInterval(pingInterval);
+  };
+  ws.onerror = () => setStatus('CONNECTION ERROR', '');
+}
+
+function disconnect() {
+  if (ws) ws.close();
+  if (audioCtx) { audioCtx.close(); audioCtx=null; }
+}
+
+// AUDIO via MediaSource
+function initAudio() {
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = parseFloat(document.getElementById('vol').value);
+  gainNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  const audio = new Audio();
+  audio.autoplay = true;
+  audio.controls = false;
+
+  mediaSource = new MediaSource();
+  audio.src = URL.createObjectURL(mediaSource);
+
+  mediaSource.addEventListener('sourceopen', () => {
+    const mime = 'audio/webm;codecs=opus';
+    if (!MediaSource.isTypeSupported(mime)) {
+      setStatus('CODEC NOT SUPPORTED', '');
+      return;
+    }
+    sourceBuffer = mediaSource.addSourceBuffer(mime);
+    sourceBuffer.mode = 'sequence';
+    sourceBuffer.addEventListener('updateend', appendNext);
+    sbReady = true;
+    appendNext();
+  });
+
+  sourceNode = audioCtx.createMediaElementSource(audio);
+  sourceNode.connect(gainNode);
+}
+
+function enqueue(chunk) {
+  queue.push(chunk);
+  if (sbReady && !sourceBuffer.updating) appendNext();
+}
+
+function appendNext() {
+  if (!queue.length || sourceBuffer.updating) return;
+  try {
+    sourceBuffer.appendBuffer(queue.shift());
+  } catch(e) {
+    // Buffer overflow — drop old data
+    if (sourceBuffer.buffered.length) {
+      const start = sourceBuffer.buffered.start(0);
+      const end   = sourceBuffer.buffered.end(0);
+      if (end - start > 10) {
+        sourceBuffer.remove(start, start + 5);
+      }
+    }
+  }
+}
+
+// BTN
+document.getElementById('btn-listen').addEventListener('click', () => {
+  if (!isListening) {
+    isListening = true;
+    document.getElementById('btn-listen').textContent = '⏹ DISCONNECT';
+    document.getElementById('btn-listen').classList.add('listening');
+    initAudio();
+    connect();
+  } else {
+    isListening = false;
+    document.getElementById('btn-listen').textContent = '▶ TUNE IN';
+    document.getElementById('btn-listen').classList.remove('listening');
+    disconnect();
+    setStatus('DISCONNECTED','');
+  }
+});
+
+document.getElementById('btn-set').addEventListener('click', () => {
+  let v = document.getElementById('server-input').value.trim();
+  if (v.startsWith('https://'))       v = 'wss://' + v.slice(8);
+  else if (v.startsWith('http://'))   v = 'ws://'  + v.slice(7);
+  else if (!v.startsWith('ws://') && !v.startsWith('wss://'))
+    v = (location.protocol === 'https:' ? 'wss://' : 'ws://') + v;
+  serverUrl = v;
+  document.getElementById('server-input').value = serverUrl;
+  if (isListening) { disconnect(); initAudio(); connect(); }
+});
+
+document.getElementById('vol').addEventListener('input', e => {
+  if (gainNode) gainNode.gain.value = e.target.value;
+  document.getElementById('vol-pct').textContent = Math.round(e.target.value*100)+'%';
+});
+
+// Poll listener count
+setInterval(async () => {
+  try {
+    let base = serverUrl;
+    if (base.startsWith('wss://'))      base = 'https://' + base.slice(6);
+    else if (base.startsWith('ws://'))  base = 'http://'  + base.slice(5);
+    base = base.replace(/\/listen\/?$/, '');
+    const r = await fetch(base + '/status');
+    const d = await r.json();
+    document.getElementById('count').textContent = d.listeners;
+  } catch(_){}
+}, 5000);
+</script>
+</body>
+</html>
