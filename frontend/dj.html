@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AETHERYON RADIO — DJ PANEL</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #04040a;
+  --deep: #080814;
+  --surface: #0e0e1f;
+  --panel: #12122a;
+  --border: #1e1e42;
+  --cyan: #00f5d4;
+  --cyan-dim: #00c4aa44;
+  --red: #ff3b5c;
+  --red-dim: #ff3b5c33;
+  --amber: #ffb830;
+  --amber-dim: #ffb83033;
+  --text: #e8e8ff;
+  --muted: #5a5a8a;
+  --mono: 'Space Mono', monospace;
+  --display: 'Bebas Neue', sans-serif;
+  --body: 'DM Sans', sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--body);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* SCAN LINES OVERLAY */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,245,212,.015) 2px, rgba(0,245,212,.015) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ═══════════════════════════════
+   HEADER
+═══════════════════════════════ */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--deep);
+}
+
+.logo {
+  font-family: var(--display);
+  font-size: 26px;
+  letter-spacing: 4px;
+  color: var(--cyan);
+  text-shadow: 0 0 20px var(--cyan);
+}
+.logo span { color: var(--muted); font-size: 13px; font-family: var(--mono); letter-spacing: 2px; display: block; margin-top: -4px; }
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  padding: 5px 12px;
+  border-radius: 2px;
+  border: 1px solid;
+  text-transform: uppercase;
+}
+.pill-off  { color: var(--muted); border-color: var(--border); }
+.pill-on   { color: var(--cyan);  border-color: var(--cyan); background: var(--cyan-dim); box-shadow: 0 0 10px var(--cyan-dim); animation: pulse-border 2s infinite; }
+.pill-live { color: var(--red);   border-color: var(--red);  background: var(--red-dim);  animation: pulse-border 1s infinite; }
+
+@keyframes pulse-border {
+  0%,100% { box-shadow: 0 0 6px currentColor; }
+  50%      { box-shadow: 0 0 18px currentColor; }
+}
+
+/* ═══════════════════════════════
+   LAYOUT GRID
+═══════════════════════════════ */
+.workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr 260px;
+  grid-template-rows: auto 1fr;
+  height: calc(100vh - 65px);
+  gap: 0;
+}
+
+/* ═══════════════════════════════
+   VISUALIZER BAR (TOP)
+═══════════════════════════════ */
+.viz-bar {
+  grid-column: 1 / -1;
+  height: 80px;
+  background: var(--deep);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  position: relative;
+}
+
+#canvas-viz {
+  flex: 1;
+  height: 60px;
+  border-radius: 2px;
+}
+
+.now-playing {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--cyan);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+.now-playing span { color: var(--muted); display: block; font-size: 9px; margin-bottom: 2px; letter-spacing: 2px; }
+
+.time-display {
+  font-family: var(--display);
+  font-size: 36px;
+  color: var(--amber);
+  letter-spacing: 3px;
+  min-width: 100px;
+  text-align: right;
+}
+
+/* ═══════════════════════════════
+   QUEUE PANEL (LEFT)
+═══════════════════════════════ */
+.queue-panel {
+  background: var(--deep);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-small {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all .2s;
+}
+.btn-small:hover { border-color: var(--cyan); color: var(--cyan); }
+
+#drop-zone {
+  margin: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+#drop-zone:hover, #drop-zone.drag-over {
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+  color: var(--cyan);
+}
+#drop-zone .icon { font-size: 20px; display: block; margin-bottom: 6px; }
+
+#file-input { display: none; }
+
+#queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+#queue-list::-webkit-scrollbar { width: 3px; }
+#queue-list::-webkit-scrollbar-track { background: transparent; }
+#queue-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 3px;
+  cursor: grab;
+  border: 1px solid transparent;
+  margin-bottom: 4px;
+  transition: all .15s;
+  position: relative;
+}
+.queue-item:hover  { background: var(--surface); border-color: var(--border); }
+.queue-item.active { background: var(--panel); border-color: var(--cyan); }
+.queue-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--cyan);
+  border-radius: 2px 0 0 2px;
+  box-shadow: 0 0 8px var(--cyan);
+}
+.queue-item.dragging { opacity: 0.4; }
+
+.q-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  min-width: 20px;
+  text-align: right;
+}
+.q-info { flex: 1; min-width: 0; }
+.q-name {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.q-dur  { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+.q-del {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.queue-item:hover .q-del { opacity: 1; }
+.q-del:hover { color: var(--red) !important; }
+
+/* ═══════════════════════════════
+   MAIN DECK (CENTER)
+═══════════════════════════════ */
+.deck {
+  display: flex;
+  flex-direction: column;
+  background: var(--void);
+  overflow-y: auto;
+}
+
+/* TRANSPORT */
+.transport {
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.track-info {
+  margin-bottom: 16px;
+}
+.track-title {
+  font-family: var(--display);
+  font-size: 28px;
+  letter-spacing: 2px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  margin-top: 2px;
+}
+
+/* Progress bar */
+.progress-wrap {
+  margin-bottom: 16px;
+}
+.progress-bar-bg {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+}
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--cyan), #0af);
+  border-radius: 2px;
+  transition: width .1s linear;
+  position: relative;
+}
+#progress-fill::after {
+  content: '';
+  position: absolute;
+  right: -4px; top: -4px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Buttons */
+.transport-btns {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-transport {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 10px 18px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all .2s;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-transport:hover { border-color: var(--cyan); color: var(--cyan); }
+.btn-transport.active { background: var(--cyan-dim); border-color: var(--cyan); color: var(--cyan); }
+
+.btn-play-main {
+  background: var(--cyan);
+  color: var(--void);
+  border-color: var(--cyan);
+  font-size: 13px;
+  padding: 12px 28px;
+  font-weight: 700;
+}
+.btn-play-main:hover { background: #00fde0; color: var(--void); border-color: #00fde0; }
+
+.volume-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.volume-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 2px; }
+#vol-slider {
+  -webkit-appearance: none;
+  width: 100px; height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+#vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--cyan);
+}
+
+/* MIC SECTION */
+.mic-section {
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--border);
+}
+.section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.mic-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn-live {
+  background: none;
+  border: 2px solid var(--red);
+  color: var(--red);
+  font-family: var(--display);
+  font-size: 18px;
+  letter-spacing: 3px;
+  padding: 12px 28px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all .2s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-live:hover  { background: var(--red-dim); }
+.btn-live.live   { background: var(--red); color: #fff; animation: live-pulse 1.5s infinite; }
+@keyframes live-pulse { 0%,100%{box-shadow:0 0 0 0 var(--red-dim)} 50%{box-shadow:0 0 0 12px transparent} }
+
+.mic-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+.btn-live.live .mic-dot { animation: blink .8s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+#mic-level-wrap { flex: 1; min-width: 120px; }
+.level-bar-bg { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+#mic-level-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--amber), var(--red)); border-radius: 3px; transition: width .05s; }
+.level-label { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 4px; letter-spacing: 2px; }
+
+/* CROSSFADER */
+.crossfader-section {
+  padding: 20px 28px;
+}
+.crossfader-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.cf-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; white-space: nowrap; }
+#crossfader {
+  -webkit-appearance: none;
+  flex: 1; height: 3px;
+  background: linear-gradient(90deg, var(--cyan-dim) 50%, var(--red-dim) 50%);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+#crossfader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px; height: 20px;
+  border-radius: 2px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  cursor: pointer;
+  transition: border-color .2s;
+}
+#crossfader::-webkit-slider-thumb:hover { border-color: var(--amber); }
+
+/* ═══════════════════════════════
+   RIGHT PANEL — SERVER
+═══════════════════════════════ */
+.server-panel {
+  background: var(--deep);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.server-config {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-row {
+  margin-bottom: 12px;
+}
+.config-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.config-input {
+  width: 100%;
+  background: var(--void);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 2px;
+  outline: none;
+  transition: border-color .2s;
+}
+.config-input:focus { border-color: var(--cyan); }
+
+.btn-connect {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  padding: 9px;
+  cursor: pointer;
+  border-radius: 2px;
+  text-transform: uppercase;
+  transition: all .2s;
+}
+.btn-connect:hover { background: var(--cyan-dim); }
+.btn-connect.connected { background: var(--cyan-dim); }
+.btn-connect.error { border-color: var(--red); color: var(--red); }
+
+/* Stats */
+.server-stats {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-key { color: var(--muted); letter-spacing: 1px; }
+.stat-val { color: var(--cyan); }
+
+/* LOG */
+.log-section { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+#server-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+#server-log::-webkit-scrollbar { width: 2px; }
+#server-log::-webkit-scrollbar-thumb { background: var(--border); }
+.log-entry { padding: 2px 0; }
+.log-entry.info  { color: var(--muted); }
+.log-entry.ok    { color: var(--cyan); }
+.log-entry.warn  { color: var(--amber); }
+.log-entry.error { color: var(--red); }
+
+/* LISTENER LINK */
+.listener-link {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--void);
+}
+.link-label { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; margin-bottom: 6px; }
+.link-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--cyan);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  word-break: break-all;
+}
+.btn-copy {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+  padding: 2px;
+  transition: color .15s;
+}
+.btn-copy:hover { color: var(--cyan); }
+
+/* TOAST */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: var(--panel);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 10px 20px;
+  border-radius: 2px;
+  transition: transform .3s ease;
+  z-index: 10000;
+  pointer-events: none;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    AETHERYON RADIO
+    <span>DJ BROADCAST PANEL</span>
+  </div>
+  <div class="header-status">
+    <div class="pill pill-off" id="ws-pill">WS OFFLINE</div>
+    <div class="pill pill-off" id="live-pill">OFF AIR</div>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- VIZ BAR -->
+  <div class="viz-bar">
+    <div class="now-playing">
+      <span>NOW PLAYING</span>
+      <span id="np-title">— No track loaded —</span>
+    </div>
+    <canvas id="canvas-viz"></canvas>
+    <div class="time-display" id="clock">00:00</div>
+  </div>
+
+  <!-- QUEUE -->
+  <div class="queue-panel">
+    <div class="panel-header">
+      Playlist
+      <button class="btn-small" id="btn-clear-queue">CLEAR</button>
+    </div>
+    <div id="drop-zone">
+      <span class="icon">🎵</span>
+      DROP AUDIO FILES<br>or click to browse
+    </div>
+    <input type="file" id="file-input" multiple accept="audio/*">
+    <div id="queue-list"></div>
+  </div>
+
+  <!-- DECK CENTER -->
+  <div class="deck">
+
+    <!-- TRANSPORT -->
+    <div class="transport">
+      <div class="track-info">
+        <div class="track-title" id="track-title">NO TRACK</div>
+        <div class="track-sub" id="track-sub">LOAD FILES INTO QUEUE →</div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-bar-bg" id="progress-bg">
+          <div id="progress-fill"></div>
+        </div>
+        <div class="time-row">
+          <span id="t-current">0:00</span>
+          <span id="t-remain">-0:00</span>
+        </div>
+      </div>
+
+      <div class="transport-btns">
+        <button class="btn-transport" id="btn-prev">⏮ PREV</button>
+        <button class="btn-transport btn-play-main" id="btn-play">▶ PLAY</button>
+        <button class="btn-transport" id="btn-next">NEXT ⏭</button>
+        <button class="btn-transport" id="btn-loop">⟳ LOOP</button>
+        <button class="btn-transport" id="btn-auto">AUTO</button>
+        <div class="volume-wrap">
+          <span class="volume-label">VOL</span>
+          <input type="range" id="vol-slider" min="0" max="1" step="0.01" value="0.8">
+          <span class="volume-label" id="vol-pct">80%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIC LIVE -->
+    <div class="mic-section">
+      <div class="section-title">Microphone — Live Broadcast</div>
+      <div class="mic-controls">
+        <button class="btn-live" id="btn-mic">
+          <span class="mic-dot"></span>
+          GO LIVE
+        </button>
+        <div id="mic-level-wrap">
+          <div class="level-bar-bg">
+            <div id="mic-level-fill"></div>
+          </div>
+          <div class="level-label" id="mic-status">MIC OFF</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CROSSFADER -->
+    <div class="crossfader-section">
+      <div class="section-title">Crossfader — Audio / Mic</div>
+      <div class="crossfader-wrap">
+        <span class="cf-label">AUDIO</span>
+        <input type="range" id="crossfader" min="0" max="100" value="100">
+        <span class="cf-label">MIC</span>
+      </div>
+    </div>
+
+  </div><!-- /deck -->
+
+  <!-- SERVER PANEL -->
+  <div class="server-panel">
+    <div class="panel-header">Server Connection</div>
+
+    <div class="server-config">
+      <div class="config-row">
+        <div class="config-label">Server URL</div>
+        <input type="text" class="config-input" id="server-url" value="ws://localhost:8000/broadcast" placeholder="ws://host:port/broadcast">
+      </div>
+      <div class="config-row">
+        <div class="config-label">Listener URL</div>
+        <input type="text" class="config-input" id="listener-url" value="http://localhost:8000/listen" placeholder="ws://host:8000/listen">
+      </div>
+      <button class="btn-connect" id="btn-connect">CONNECT</button>
+    </div>
+
+    <div class="server-stats">
+      <div class="panel-header" style="padding:0 0 8px;">Live Stats</div>
+      <div class="stat-row"><span class="stat-key">STATUS</span><span class="stat-val" id="stat-status">OFFLINE</span></div>
+      <div class="stat-row"><span class="stat-key">LISTENERS</span><span class="stat-val" id="stat-listeners">0</span></div>
+      <div class="stat-row"><span class="stat-key">SENT</span><span class="stat-val" id="stat-chunks">0</span></div>
+      <div class="stat-row"><span class="stat-key">BITRATE</span><span class="stat-val" id="stat-bitrate">—</span></div>
+    </div>
+
+    <div class="log-section">
+      <div class="panel-header">Log</div>
+      <div id="server-log"></div>
+    </div>
+
+    <div class="listener-link">
+      <div class="link-label">Share listener link</div>
+      <div class="link-box">
+        <span id="listener-link-text">listener.html?server=localhost:8000</span>
+        <button class="btn-copy" id="btn-copy-link" title="Copy">⎘</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /workspace -->
+
+<div class="toast" id="toast"></div>
+
+<audio id="audio-player" preload="auto"></audio>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+const state = {
+  queue: [],
+  currentIndex: -1,
+  playing: false,
+  loop: false,
+  autoNext: true,
+  micLive: false,
+  wsConnected: false,
+  chunksOut: 0,
+  listeners: 0,
+};
+
+// Audio contexts
+let audioCtx, analyser, sourceNode, micStream, micSource;
+let ws = null;
+let mediaRecorder = null;
+let micAnalyser = null;
+let statusInterval = null;
+let bytesSent = 0, bytesSentLast = 0, bitrateTimer = null;
+
+// DOM
+const audio      = document.getElementById('audio-player');
+const canvas     = document.getElementById('canvas-viz');
+const ctx        = canvas.getContext('2d');
+const queueList  = document.getElementById('queue-list');
+const dropZone   = document.getElementById('drop-zone');
+const fileInput  = document.getElementById('file-input');
+
+// ═══════════════════════════════════════════════════════════
+//  INIT AUDIO CONTEXT
+// ═══════════════════════════════════════════════════════════
+function initAudioCtx() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  sourceNode = audioCtx.createMediaElementSource(audio);
+  sourceNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  VISUALIZER
+// ═══════════════════════════════════════════════════════════
+function resizeCanvas() {
+  canvas.width  = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function drawViz() {
+  requestAnimationFrame(drawViz);
+  if (!analyser) {
+    ctx.fillStyle = '#04040a';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  ctx.fillStyle = 'rgba(4,4,10,0.4)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  const barW = canvas.width / data.length * 2.5;
+  let x = 0;
+  for (let i = 0; i < data.length; i++) {
+    const h = (data[i] / 255) * canvas.height;
+    const hue = (i / data.length) * 160 + 160; // cyan → blue range
+    ctx.fillStyle = `hsl(${hue},100%,${40 + data[i]/255*30}%)`;
+    ctx.fillRect(x, canvas.height - h, barW - 1, h);
+    x += barW;
+  }
+}
+drawViz();
+
+// ═══════════════════════════════════════════════════════════
+//  CLOCK
+// ═══════════════════════════════════════════════════════════
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.getHours().toString().padStart(2,'0') + ':' +
+    now.getMinutes().toString().padStart(2,'0');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════════════════
+//  QUEUE
+// ═══════════════════════════════════════════════════════════
+function addFiles(files) {
+  [...files].forEach(file => {
+    if (!file.type.startsWith('audio/')) return;
+    const url = URL.createObjectURL(file);
+    state.queue.push({ name: file.name.replace(/\.[^.]+$/,''), url, duration: '—' });
+    // Get duration
+    const tmp = new Audio(url);
+    const idx = state.queue.length - 1;
+    tmp.addEventListener('loadedmetadata', () => {
+      state.queue[idx].duration = formatTime(tmp.duration);
+      renderQueue();
+    });
+  });
+  renderQueue();
+}
+
+function renderQueue() {
+  queueList.innerHTML = '';
+  state.queue.forEach((item, i) => {
+    const el = document.createElement('div');
+    el.className = 'queue-item' + (i === state.currentIndex ? ' active' : '');
+    el.draggable = true;
+    el.innerHTML = `
+      <span class="q-num">${i+1}</span>
+      <div class="q-info">
+        <div class="q-name" title="${item.name}">${item.name}</div>
+        <div class="q-dur">${item.duration}</div>
+      </div>
+      <button class="q-del" data-i="${i}" title="Remove">✕</button>`;
+
+    el.addEventListener('dblclick', () => loadTrack(i));
+    el.querySelector('.q-del').addEventListener('click', e => {
+      e.stopPropagation();
+      state.queue.splice(i, 1);
+      if (state.currentIndex >= i) state.currentIndex--;
+      renderQueue();
+    });
+
+    // Drag reorder
+    el.addEventListener('dragstart', () => { el.classList.add('dragging'); el.dataset.dragIdx = i; });
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+    el.addEventListener('dragover', e => e.preventDefault());
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = parseInt(document.querySelector('.dragging')?.dataset?.dragIdx ?? -1);
+      if (from < 0 || from === i) return;
+      const moved = state.queue.splice(from, 1)[0];
+      state.queue.splice(i, 0, moved);
+      if (state.currentIndex === from) state.currentIndex = i;
+      renderQueue();
+    });
+
+    queueList.appendChild(el);
+  });
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
+document.getElementById('btn-clear-queue').addEventListener('click', () => {
+  state.queue = [];
+  state.currentIndex = -1;
+  renderQueue();
+  audio.src = '';
+  document.getElementById('track-title').textContent = 'NO TRACK';
+  document.getElementById('track-sub').textContent = 'LOAD FILES INTO QUEUE →';
+});
+
+// ═══════════════════════════════════════════════════════════
+//  PLAYBACK
+// ═══════════════════════════════════════════════════════════
+function formatTime(s) {
+  if (!isFinite(s)) return '—';
+  const m = Math.floor(s/60), ss = Math.floor(s%60);
+  return `${m}:${ss.toString().padStart(2,'0')}`;
+}
+
+function loadTrack(idx) {
+  if (idx < 0 || idx >= state.queue.length) return;
+  initAudioCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  state.currentIndex = idx;
+  const track = state.queue[idx];
+  audio.src = track.url;
+  audio.volume = parseFloat(document.getElementById('vol-slider').value);
+  document.getElementById('track-title').textContent = track.name;
+  document.getElementById('track-sub').textContent = `TRACK ${idx+1} / ${state.queue.length}`;
+  document.getElementById('np-title').textContent = track.name;
+  renderQueue();
+  if (state.playing) audio.play();
+}
+
+function togglePlay() {
+  initAudioCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audio.src && state.queue.length) loadTrack(0);
+  if (audio.paused) {
+    audio.play();
+    state.playing = true;
+    document.getElementById('btn-play').textContent = '⏸ PAUSE';
+  } else {
+    audio.pause();
+    state.playing = false;
+    document.getElementById('btn-play').textContent = '▶ PLAY';
+  }
+}
+
+audio.addEventListener('timeupdate', () => {
+  const pct = audio.duration ? (audio.currentTime / audio.duration * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('t-current').textContent = formatTime(audio.currentTime);
+  document.getElementById('t-remain').textContent  = '-' + formatTime(audio.duration - audio.currentTime);
+});
+
+audio.addEventListener('ended', () => {
+  if (state.loop) { audio.play(); return; }
+  if (state.autoNext && state.currentIndex < state.queue.length - 1) {
+    loadTrack(state.currentIndex + 1);
+    audio.play();
+  } else {
+    state.playing = false;
+    document.getElementById('btn-play').textContent = '▶ PLAY';
+  }
+});
+
+document.getElementById('progress-bg').addEventListener('click', e => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  audio.currentTime = ((e.clientX - rect.left) / rect.width) * audio.duration;
+});
+
+document.getElementById('btn-play').addEventListener('click', togglePlay);
+document.getElementById('btn-prev').addEventListener('click', () => {
+  if (state.currentIndex > 0) loadTrack(state.currentIndex - 1);
+});
+document.getElementById('btn-next').addEventListener('click', () => {
+  if (state.currentIndex < state.queue.length - 1) loadTrack(state.currentIndex + 1);
+});
+
+const btnLoop = document.getElementById('btn-loop');
+btnLoop.addEventListener('click', () => {
+  state.loop = !state.loop;
+  btnLoop.classList.toggle('active', state.loop);
+});
+
+const btnAuto = document.getElementById('btn-auto');
+btnAuto.classList.add('active');
+btnAuto.addEventListener('click', () => {
+  state.autoNext = !state.autoNext;
+  btnAuto.classList.toggle('active', state.autoNext);
+});
+
+document.getElementById('vol-slider').addEventListener('input', e => {
+  audio.volume = e.target.value;
+  document.getElementById('vol-pct').textContent = Math.round(e.target.value * 100) + '%';
+});
+
+document.getElementById('crossfader').addEventListener('input', e => {
+  const v = e.target.value / 100; // 0=audio, 1=mic
+  audio.volume = (1 - v) * parseFloat(document.getElementById('vol-slider').value);
+});
+
+// ═══════════════════════════════════════════════════════════
+//  MIC / LIVE
+// ═══════════════════════════════════════════════════════════
+async function toggleMic() {
+  if (!state.micLive) {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+      // Mic level visualizer
+      const mCtx = new AudioContext();
+      micAnalyser = mCtx.createAnalyser();
+      micAnalyser.fftSize = 256;
+      const mSrc = mCtx.createMediaStreamSource(micStream);
+      mSrc.connect(micAnalyser);
+
+      // Stream via WebSocket if connected
+      if (state.wsConnected && ws) {
+        const opts = { audioBitsPerSecond: 64000, mimeType: getSupportedMime() };
+        mediaRecorder = new MediaRecorder(micStream, opts);
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+            ws.send(e.data);
+            state.chunksOut++;
+            bytesSent += e.data.size;
+            document.getElementById('stat-chunks').textContent = state.chunksOut;
+          }
+        };
+        mediaRecorder.start(100); // 100ms chunks
+      }
+
+      state.micLive = true;
+      document.getElementById('btn-mic').classList.add('live');
+      document.getElementById('btn-mic').innerHTML = '<span class="mic-dot"></span> LIVE — CLICK TO STOP';
+      document.getElementById('live-pill').textContent = 'ON AIR';
+      document.getElementById('live-pill').className = 'pill pill-live';
+      document.getElementById('mic-status').textContent = 'BROADCASTING';
+
+      // Animate mic level
+      (function animMic() {
+        if (!state.micLive) return;
+        const arr = new Uint8Array(micAnalyser.frequencyBinCount);
+        micAnalyser.getByteFrequencyData(arr);
+        const avg = arr.reduce((a,b)=>a+b,0)/arr.length;
+        document.getElementById('mic-level-fill').style.width = Math.min(avg*2,100) + '%';
+        requestAnimationFrame(animMic);
+      })();
+
+      log('🎙️ Microphone LIVE', 'ok');
+    } catch(err) {
+      log('Mic error: ' + err.message, 'error');
+    }
+  } else {
+    if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    state.micLive = false;
+    document.getElementById('btn-mic').classList.remove('live');
+    document.getElementById('btn-mic').innerHTML = '<span class="mic-dot"></span> GO LIVE';
+    document.getElementById('live-pill').textContent = 'OFF AIR';
+    document.getElementById('live-pill').className = 'pill pill-off';
+    document.getElementById('mic-level-fill').style.width = '0%';
+    document.getElementById('mic-status').textContent = 'MIC OFF';
+    log('🎙️ Mic off', 'info');
+  }
+}
+
+document.getElementById('btn-mic').addEventListener('click', toggleMic);
+
+function getSupportedMime() {
+  const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  WEBSOCKET SERVER
+// ═══════════════════════════════════════════════════════════
+function connectWS() {
+  const url = document.getElementById('server-url').value.trim();
+  if (!url) return;
+  log('Connecting → ' + url, 'info');
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    state.wsConnected = true;
+    document.getElementById('btn-connect').textContent = 'DISCONNECT';
+    document.getElementById('btn-connect').classList.add('connected');
+    document.getElementById('ws-pill').textContent   = 'WS ONLINE';
+    document.getElementById('ws-pill').className     = 'pill pill-on';
+    document.getElementById('stat-status').textContent = 'CONNECTED';
+    log('✓ Connected to server', 'ok');
+    // Poll stats
+    statusInterval = setInterval(fetchStats, 3000);
+    bitrateTimer   = setInterval(calcBitrate, 1000);
+  };
+  ws.onclose = () => {
+    state.wsConnected = false;
+    document.getElementById('btn-connect').textContent = 'CONNECT';
+    document.getElementById('btn-connect').classList.remove('connected');
+    document.getElementById('ws-pill').textContent = 'WS OFFLINE';
+    document.getElementById('ws-pill').className   = 'pill pill-off';
+    document.getElementById('stat-status').textContent = 'OFFLINE';
+    clearInterval(statusInterval);
+    clearInterval(bitrateTimer);
+    log('✗ Disconnected', 'warn');
+  };
+  ws.onerror = () => log('⚠ WebSocket error', 'error');
+}
+
+function disconnectWS() {
+  if (ws) ws.close();
+}
+
+document.getElementById('btn-connect').addEventListener('click', () => {
+  state.wsConnected ? disconnectWS() : connectWS();
+});
+
+async function fetchStats() {
+  try {
+    const base = document.getElementById('server-url').value
+      .replace('ws://','http://').replace('wss://','https://')
+      .replace('/broadcast','');
+    const r = await fetch(base + '/status');
+    const d = await r.json();
+    document.getElementById('stat-listeners').textContent = d.listeners;
+    state.listeners = d.listeners;
+  } catch(_) {}
+}
+
+function calcBitrate() {
+  const kbps = ((bytesSent - bytesSentLast) * 8 / 1024).toFixed(1);
+  document.getElementById('stat-bitrate').textContent = kbps + ' kbps';
+  bytesSentLast = bytesSent;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════════════════
+function log(msg, type='info') {
+  const el = document.getElementById('server-log');
+  const now = new Date();
+  const t = now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + type;
+  div.textContent = `[${t}] ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LISTENER LINK
+// ═══════════════════════════════════════════════════════════
+function updateListenerLink() {
+  const base = document.getElementById('listener-url').value || 'localhost:8000';
+  const link = `listener.html?server=${encodeURIComponent(base)}`;
+  document.getElementById('listener-link-text').textContent = link;
+}
+document.getElementById('listener-url').addEventListener('input', updateListenerLink);
+updateListenerLink();
+
+document.getElementById('btn-copy-link').addEventListener('click', () => {
+  const text = document.getElementById('listener-link-text').textContent;
+  navigator.clipboard.writeText(text).then(() => showToast('Link copiado'));
+});
+
+// ═══════════════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════════════
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// Init log
+log('AETHERYON Radio initialized', 'ok');
+log('Load audio files → connect server → go live', 'info');
+</script>
+</body>
+</html>

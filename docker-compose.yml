@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  radio-server:
+    build: ./backend
+    container_name: aetheryon-radio
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
