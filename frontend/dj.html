@@ -788,7 +788,7 @@ const state = {
 };
 
 // Audio contexts
-let audioCtx, analyser, sourceNode, micStream, micSource;
+let audioCtx, analyser, sourceNode, micStream, micSource, audioDestination;
 let ws = null;
 let mediaRecorder = null;
 let micAnalyser = null;
@@ -811,9 +811,13 @@ function initAudioCtx() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
+  // MediaStreamDestination — captures all audio output for broadcast
+  audioDestination = audioCtx.createMediaStreamDestination();
   sourceNode = audioCtx.createMediaElementSource(audio);
   sourceNode.connect(analyser);
   analyser.connect(audioCtx.destination);
+  // Also route to broadcast destination
+  sourceNode.connect(audioDestination);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -959,7 +963,41 @@ function loadTrack(idx) {
   document.getElementById('track-sub').textContent = `TRACK ${idx+1} / ${state.queue.length}`;
   document.getElementById('np-title').textContent = track.name;
   renderQueue();
-  if (state.playing) audio.play();
+  if (state.playing) {
+    audio.play();
+    startAudioBroadcast();
+  }
+}
+
+// Broadcast the AudioContext output stream (queue audio)
+function startAudioBroadcast() {
+  if (!state.wsConnected || !ws || !audioDestination) return;
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
+  const mime = getSupportedMime();
+  mediaRecorder = new MediaRecorder(audioDestination.stream, { audioBitsPerSecond: 64000, mimeType: mime });
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(e.data);
+      state.chunksOut++;
+      bytesSent += e.data.size;
+      document.getElementById('stat-chunks').textContent = state.chunksOut;
+    }
+  };
+  mediaRecorder.start(100);
+  document.getElementById('live-pill').textContent = 'ON AIR';
+  document.getElementById('live-pill').className = 'pill pill-live';
+  log('📻 Audio broadcast started', 'ok');
+}
+
+function stopAudioBroadcast() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    mediaRecorder = null;
+  }
+  if (!state.micLive) {
+    document.getElementById('live-pill').textContent = 'OFF AIR';
+    document.getElementById('live-pill').className = 'pill pill-off';
+  }
 }
 
 function togglePlay() {
@@ -970,10 +1008,12 @@ function togglePlay() {
     audio.play();
     state.playing = true;
     document.getElementById('btn-play').textContent = '⏸ PAUSE';
+    startAudioBroadcast();
   } else {
     audio.pause();
     state.playing = false;
     document.getElementById('btn-play').textContent = '▶ PLAY';
+    stopAudioBroadcast();
   }
 }
 
@@ -989,9 +1029,11 @@ audio.addEventListener('ended', () => {
   if (state.autoNext && state.currentIndex < state.queue.length - 1) {
     loadTrack(state.currentIndex + 1);
     audio.play();
+    startAudioBroadcast();
   } else {
     state.playing = false;
     document.getElementById('btn-play').textContent = '▶ PLAY';
+    stopAudioBroadcast();
   }
 });
 
@@ -1046,19 +1088,29 @@ async function toggleMic() {
       const mSrc = mCtx.createMediaStreamSource(micStream);
       mSrc.connect(micAnalyser);
 
+      // Route mic into audioContext so it broadcasts with the audio mix
+      initAudioCtx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      micSource = audioCtx.createMediaStreamSource(micStream);
+      micSource.connect(audioDestination);
+
       // Stream via WebSocket if connected
       if (state.wsConnected && ws) {
+        // Stop any existing audio-only broadcast first
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop(); mediaRecorder = null;
+        }
         const opts = { audioBitsPerSecond: 64000, mimeType: getSupportedMime() };
-        mediaRecorder = new MediaRecorder(micStream, opts);
+        mediaRecorder = new MediaRecorder(audioDestination.stream, opts);
         mediaRecorder.ondataavailable = e => {
-          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
             ws.send(e.data);
             state.chunksOut++;
             bytesSent += e.data.size;
             document.getElementById('stat-chunks').textContent = state.chunksOut;
           }
         };
-        mediaRecorder.start(100); // 100ms chunks
+        mediaRecorder.start(100);
       }
 
       state.micLive = true;
