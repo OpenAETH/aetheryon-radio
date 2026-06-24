@@ -706,7 +706,6 @@ header {
           <span class="mic-dot"></span>
           GO LIVE
         </button>
-        <button class="btn-transport" id="btn-mute-mic" disabled>🔊 MIC ON</button>
         <div id="mic-level-wrap">
           <div class="level-bar-bg">
             <div id="mic-level-fill"></div>
@@ -783,14 +782,13 @@ const state = {
   loop: false,
   autoNext: true,
   micLive: false,
-  micMuted: false,
   wsConnected: false,
   chunksOut: 0,
   listeners: 0,
 };
 
 // Audio contexts
-let audioCtx, analyser, sourceNode, micStream, micSource, micGain, audioDestination;
+let audioCtx, analyser, sourceNode, micStream, micSource, audioDestination;
 let ws = null;
 let mediaRecorder = null;
 let micAnalyser = null;
@@ -1094,11 +1092,7 @@ async function toggleMic() {
       initAudioCtx();
       if (audioCtx.state === 'suspended') audioCtx.resume();
       micSource = audioCtx.createMediaStreamSource(micStream);
-      // GainNode permite mutear la voz sin cortar la transmisión de música
-      micGain = audioCtx.createGain();
-      micGain.gain.value = state.micMuted ? 0 : 1;
-      micSource.connect(micGain);
-      micGain.connect(audioDestination);
+      micSource.connect(audioDestination);
 
       // Stream via WebSocket if connected
       if (state.wsConnected && ws) {
@@ -1124,12 +1118,7 @@ async function toggleMic() {
       document.getElementById('btn-mic').innerHTML = '<span class="mic-dot"></span> LIVE — CLICK TO STOP';
       document.getElementById('live-pill').textContent = 'ON AIR';
       document.getElementById('live-pill').className = 'pill pill-live';
-      document.getElementById('mic-status').textContent = state.micMuted ? 'MIC MUTED' : 'BROADCASTING';
-
-      // Habilitar botón de mute ahora que el mic está activo
-      const muteBtn = document.getElementById('btn-mute-mic');
-      muteBtn.disabled = false;
-      updateMuteBtn();
+      document.getElementById('mic-status').textContent = 'BROADCASTING';
 
       // Animate mic level
       (function animMic() {
@@ -1148,22 +1137,11 @@ async function toggleMic() {
   } else {
     if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
     if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    if (micSource) { try { micSource.disconnect(); } catch(_){} micSource = null; }
-    if (micGain) { try { micGain.disconnect(); } catch(_){} micGain = null; }
     state.micLive = false;
     document.getElementById('btn-mic').classList.remove('live');
     document.getElementById('btn-mic').innerHTML = '<span class="mic-dot"></span> GO LIVE';
-    const muteBtn = document.getElementById('btn-mute-mic');
-    muteBtn.disabled = true;
-    muteBtn.classList.remove('active');
-    muteBtn.textContent = '🔊 MIC ON';
-    // Si la música sigue sonando, la transmisión continúa; si no, OFF AIR
-    if (state.playing) {
-      startAudioBroadcast();
-    } else {
-      document.getElementById('live-pill').textContent = 'OFF AIR';
-      document.getElementById('live-pill').className = 'pill pill-off';
-    }
+    document.getElementById('live-pill').textContent = 'OFF AIR';
+    document.getElementById('live-pill').className = 'pill pill-off';
     document.getElementById('mic-level-fill').style.width = '0%';
     document.getElementById('mic-status').textContent = 'MIC OFF';
     log('🎙️ Mic off', 'info');
@@ -1171,24 +1149,6 @@ async function toggleMic() {
 }
 
 document.getElementById('btn-mic').addEventListener('click', toggleMic);
-
-// Mutea SOLO la voz del micrófono; la música/audio sigue transmitiéndose en vivo
-function toggleMicMute() {
-  if (!state.micLive) return;
-  state.micMuted = !state.micMuted;
-  if (micGain) micGain.gain.value = state.micMuted ? 0 : 1;
-  updateMuteBtn();
-  document.getElementById('mic-status').textContent = state.micMuted ? 'MIC MUTED' : 'BROADCASTING';
-  log(state.micMuted ? '🔇 Mic muteado (audio sigue al aire)' : '🔊 Mic activo', 'info');
-}
-
-function updateMuteBtn() {
-  const btn = document.getElementById('btn-mute-mic');
-  btn.textContent = state.micMuted ? '🔇 MIC MUTED' : '🔊 MIC ON';
-  btn.classList.toggle('active', state.micMuted);
-}
-
-document.getElementById('btn-mute-mic').addEventListener('click', toggleMicMute);
 
 function getSupportedMime() {
   const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
@@ -1213,8 +1173,6 @@ function connectWS() {
     document.getElementById('ws-pill').className     = 'pill pill-on';
     document.getElementById('stat-status').textContent = 'CONNECTED';
     log('✓ Connected to server', 'ok');
-    // Si ya hay música sonando o el mic está live, empezar a transmitir ahora
-    if (state.playing || state.micLive) startAudioBroadcast();
     // Poll stats
     statusInterval = setInterval(fetchStats, 3000);
     bitrateTimer   = setInterval(calcBitrate, 1000);
