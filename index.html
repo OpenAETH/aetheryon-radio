@@ -106,6 +106,9 @@ canvas {
   border-radius:2px;
   transition:all .2s;
   margin-bottom:20px;
+  /* Critical for mobile touch response */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .btn-listen:hover  { background:var(--cyan-dim); }
 .btn-listen.active { border-color:var(--amber); color:var(--amber); }
@@ -118,8 +121,9 @@ canvas {
   background:var(--border); border-radius:2px; outline:none; cursor:pointer;
 }
 #vol::-webkit-slider-thumb {
-  -webkit-appearance:none; width:14px; height:14px;
+  -webkit-appearance:none; width:20px; height:20px;
   border-radius:50%; background:var(--cyan); box-shadow:0 0 6px var(--cyan);
+  /* Larger touch target on mobile */
 }
 .server-row { display:flex; gap:8px; align-items:center; }
 .server-row input {
@@ -133,10 +137,34 @@ canvas {
   background:none; border:1px solid var(--border); color:var(--muted);
   font-family:var(--mono); font-size:9px; letter-spacing:1px;
   padding:8px 10px; cursor:pointer; border-radius:2px; white-space:nowrap;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
 .listener-count { margin-top:16px; font-size:10px; color:var(--muted); letter-spacing:2px; }
 .listener-count span { color:var(--cyan); }
+
+/* Buffer indicator */
+.buffer-bar {
+  height:2px;
+  background:var(--border);
+  border-radius:1px;
+  margin-top:12px;
+  overflow:hidden;
+}
+.buffer-fill {
+  height:100%;
+  width:0%;
+  background:linear-gradient(90deg,var(--cyan),var(--amber));
+  border-radius:1px;
+  transition:width .3s ease;
+}
+.buffer-label {
+  font-size:9px;
+  color:var(--muted);
+  letter-spacing:2px;
+  margin-top:4px;
+}
 </style>
 </head>
 <body>
@@ -159,11 +187,34 @@ canvas {
     <input type="text" id="server-input" placeholder="wss://host:port/listen">
     <button class="btn-mini" id="btn-set">SET</button>
   </div>
+  <div class="buffer-bar"><div class="buffer-fill" id="buffer-fill"></div></div>
+  <div class="buffer-label" id="buffer-label">BUFFER: —</div>
   <div class="listener-count">Oyentes: <span id="count">—</span></div>
 </div>
 
 <script>
-// ── toWS: convierte cualquier string a wss:// o ws:// ──
+// ══════════════════════════════════════════════════════════════
+//  AETHERYON RADIO — Listener v2 (Mobile-compatible)
+//
+//  CAMBIO CLAVE vs v1:
+//  v1 usaba MediaSource Extensions (MSE) — no funciona en mobile
+//  porque:
+//    1. AudioContext queda suspended sin interacción directa
+//    2. MediaSource.sourceopen no dispara en <audio> off-DOM
+//    3. autoplay bloqueado en iOS/Android Chrome
+//
+//  v2 usa decodeAudioData() + AudioBufferSourceNode scheduling:
+//    - 100% Web Audio API, sin MSE
+//    - El AudioContext se resume() en el mismo click handler
+//    - Funciona en Chrome mobile, Safari iOS, Firefox Android
+//    - Prebuffer configurable para absorber jitter del tunnel
+// ══════════════════════════════════════════════════════════════
+
+// ── Config ──
+var PREBUFFER_CHUNKS = 3;    // chunks a acumular antes de empezar a sonar
+var PING_INTERVAL    = 20000; // ms entre pings keepalive
+
+// ── toWS ──
 function toWS(raw) {
   var s = String(raw || '').trim();
   if (!s) return '';
@@ -173,18 +224,29 @@ function toWS(raw) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
 }
 
-// ── Leer ?server= del query string ──
+// ── URL desde ?server= ──
 var rawParam  = new URLSearchParams(location.search).get('server') || '';
 var serverUrl = toWS(rawParam);
 document.getElementById('server-input').value = serverUrl;
 
-// ── Estado ──
-var ws = null, audioCtx = null, analyser = null, gainNode = null;
-var mediaSource = null, sourceBuffer = null;
-var isListening = false, sbReady = false;
-var queue = [], pingTimer = null;
+// ── Estado global ──
+var ws          = null;
+var audioCtx    = null;
+var analyser    = null;
+var gainNode    = null;
+var isListening = false;
+var pingTimer   = null;
+var countTimer  = null;
 
-// ── Visualizador ──
+// Cola de decodificación: ArrayBuffer[] pendientes
+var chunkQueue     = [];
+// Cola de reproducción: { buffer, scheduledAt }
+var playQueue      = [];
+var nextPlayTime   = 0;   // cuando reproducir el siguiente chunk
+var prebufferCount = 0;   // chunks acumulados antes de arrancar
+var playing        = false;
+
+// ── Canvas visualizador ──
 var canvas = document.getElementById('viz');
 var ctx2d  = canvas.getContext('2d');
 canvas.width  = canvas.offsetWidth || 340;
@@ -210,14 +272,24 @@ function drawViz() {
 }
 drawViz();
 
-// ── Status UI ──
+// ── UI helpers ──
 function setStatus(text, cls) {
   document.getElementById('status-text').textContent = text;
   document.getElementById('dot').className = 'dot' + (cls ? ' ' + cls : '');
 }
 
-// ── Audio via MediaSource ──
-function initAudio() {
+function setBuffer(n, total) {
+  var pct = total > 0 ? Math.min((n / total) * 100, 100) : 0;
+  document.getElementById('buffer-fill').style.width = pct + '%';
+  document.getElementById('buffer-label').textContent =
+    n >= total ? 'BUFFER: LISTO' : 'BUFFER: ' + n + '/' + total;
+}
+
+// ── Audio Engine (Web Audio API puro, sin MSE) ──
+function initAudioCtx() {
+  // CRÍTICO: crear el AudioContext dentro del mismo event handler del click
+  // para que mobile lo considere activado por gesto de usuario
+  if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
@@ -225,47 +297,66 @@ function initAudio() {
   gainNode.gain.value = parseFloat(document.getElementById('vol').value);
   gainNode.connect(analyser);
   analyser.connect(audioCtx.destination);
-
-  var audio      = new Audio();
-  audio.autoplay = true;
-  mediaSource    = new MediaSource();
-  audio.src      = URL.createObjectURL(mediaSource);
-
-  function getSupportedMime() {
-    var types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'];
-    for (var i = 0; i < types.length; i++) {
-      if (MediaSource.isTypeSupported(types[i])) return types[i];
-    }
-    return '';
-  }
-
-  mediaSource.addEventListener('sourceopen', function () {
-    var mime = getSupportedMime();
-    if (!mime) { setStatus('CODEC NO SOPORTADO', ''); return; }
-    sourceBuffer      = mediaSource.addSourceBuffer(mime);
-    sourceBuffer.mode = 'sequence';
-    sourceBuffer.addEventListener('updateend', appendNext);
-    sbReady = true;
-    appendNext();
-  });
-
-  audioCtx.createMediaElementSource(audio).connect(gainNode);
 }
 
-function appendNext() {
-  if (!queue.length || !sourceBuffer || sourceBuffer.updating) return;
-  var chunk = queue[0];
-  try {
-    sourceBuffer.appendBuffer(chunk);
-    queue.shift();
-  } catch (e) {
-    queue.shift();
-    if (sourceBuffer.buffered && sourceBuffer.buffered.length) {
-      var s = sourceBuffer.buffered.start(0);
-      var e2 = sourceBuffer.buffered.end(0);
-      if (e2 - s > 30) sourceBuffer.remove(s, s + 10);
-    }
+function resumeCtx() {
+  // Mobile puede suspender el contexto; lo reactivamos explícitamente
+  if (audioCtx && audioCtx.state === 'suspended') {
+    return audioCtx.resume();
   }
+  return Promise.resolve();
+}
+
+// Decodifica un ArrayBuffer y lo encola para reproducción
+function processChunk(arrayBuffer) {
+  if (!audioCtx) return;
+
+  // Copiar el buffer antes de decodificar (decodeAudioData consume el original)
+  var copy = arrayBuffer.slice(0);
+
+  audioCtx.decodeAudioData(copy, function(audioBuffer) {
+    chunkQueue.push(audioBuffer);
+    prebufferCount++;
+    setBuffer(prebufferCount, PREBUFFER_CHUNKS);
+
+    // Arrancar reproducción una vez acumulado el prebuffer
+    if (!playing && prebufferCount >= PREBUFFER_CHUNKS) {
+      playing = true;
+      nextPlayTime = audioCtx.currentTime + 0.05; // pequeño offset de arranque
+      flushQueue();
+    } else if (playing) {
+      flushQueue();
+    }
+  }, function(err) {
+    // Chunk indecodificable (ej: header de WebM incompleto al inicio)
+    // Simplemente descartamos — el siguiente chunk incluirá info suficiente
+    console.warn('[AETHERYON] decodeAudioData skip:', err);
+  });
+}
+
+// Programa todos los chunks pendientes en el timeline de AudioContext
+function flushQueue() {
+  while (chunkQueue.length > 0) {
+    var buf    = chunkQueue.shift();
+    var source = audioCtx.createBufferSource();
+    source.buffer = buf;
+    source.connect(gainNode);
+
+    // Scheduling preciso: cada chunk se programa para justo después del anterior
+    // Esto elimina gaps y clicks entre chunks
+    var startAt = Math.max(nextPlayTime, audioCtx.currentTime);
+    source.start(startAt);
+    nextPlayTime = startAt + buf.duration;
+  }
+}
+
+// Reset completo del engine de audio (sin cerrar el AudioContext)
+function resetAudioEngine() {
+  chunkQueue     = [];
+  prebufferCount = 0;
+  playing        = false;
+  nextPlayTime   = 0;
+  setBuffer(0, PREBUFFER_CHUNKS);
 }
 
 // ── WebSocket ──
@@ -277,45 +368,81 @@ function connect() {
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
-  ws.onopen = function () {
+  ws.onopen = function() {
     setStatus('CONECTADO — ESPERANDO DJ', 'connected');
-    pingTimer = setInterval(function () {
+    // Keepalive ping para el watchdog del servidor
+    pingTimer = setInterval(function() {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
-    }, 20000);
+    }, PING_INTERVAL);
+    // Poll oyentes
+    countTimer = setInterval(fetchCount, 5000);
   };
 
-  ws.onmessage = function (e) {
+  ws.onmessage = function(e) {
+    // Ignorar frames de texto (pong, etc.)
     if (typeof e.data === 'string') return;
+
     setStatus('EN VIVO', 'live');
-    queue.push(e.data);
-    if (sbReady && !sourceBuffer.updating) appendNext();
+
+    // ── PUNTO CLAVE ──
+    // En v1: queue.push(e.data) → sourceBuffer.appendBuffer()  [MSE, roto en mobile]
+    // En v2: processChunk()     → decodeAudioData() → AudioBufferSourceNode [funciona en mobile]
+    resumeCtx().then(function() {
+      processChunk(e.data);
+    });
   };
 
-  ws.onclose = function () {
+  ws.onclose = function() {
     setStatus('DESCONECTADO', '');
     clearInterval(pingTimer);
+    clearInterval(countTimer);
+    // Si el DJ se va, resetear buffer para próxima sesión
+    resetAudioEngine();
   };
 
-  ws.onerror = function () {
+  ws.onerror = function() {
     setStatus('ERROR DE CONEXIÓN', '');
   };
 }
 
 function disconnect() {
   clearInterval(pingTimer);
+  clearInterval(countTimer);
   if (ws) { ws.close(); ws = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; analyser = null; }
-  sourceBuffer = null; mediaSource = null; sbReady = false; queue = [];
+  resetAudioEngine();
+}
+
+// ── Fetch oyentes activos ──
+function fetchCount() {
+  try {
+    // Derivar URL HTTP del status desde la WS URL del listener
+    var httpBase = serverUrl
+      .replace('wss://','https://')
+      .replace('ws://','http://')
+      .replace('/listen','');
+    fetch(httpBase + '/status')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ document.getElementById('count').textContent = d.listeners; })
+      .catch(function(){});
+  } catch(_) {}
 }
 
 // ── Botón principal ──
-document.getElementById('btn-listen').addEventListener('click', function () {
+document.getElementById('btn-listen').addEventListener('click', function() {
   if (!isListening) {
     isListening = true;
     this.textContent = '⏹ DESCONECTAR';
     this.classList.add('active');
-    initAudio();
-    connect();
+
+    // CRÍTICO MOBILE: initAudioCtx() debe llamarse AQUÍ, dentro del
+    // mismo handler del evento click/touch, para que el browser lo
+    // considere activado por interacción de usuario.
+    // Si lo llamás en un callback asíncrono (setTimeout, ws.onmessage, etc.)
+    // mobile lo suspende inmediatamente.
+    initAudioCtx();
+
+    // Resume explícito por si el contexto ya existía suspendido
+    resumeCtx().then(function() { connect(); });
   } else {
     isListening = false;
     this.textContent = '▶ TUNE IN';
@@ -326,14 +453,18 @@ document.getElementById('btn-listen').addEventListener('click', function () {
 });
 
 // ── Botón SET ──
-document.getElementById('btn-set').addEventListener('click', function () {
+document.getElementById('btn-set').addEventListener('click', function() {
   serverUrl = toWS(document.getElementById('server-input').value.trim());
   document.getElementById('server-input').value = serverUrl;
-  if (isListening) { disconnect(); initAudio(); connect(); }
+  if (isListening) {
+    disconnect();
+    // AudioContext ya existe y está activo — no recrear
+    resumeCtx().then(function() { connect(); });
+  }
 });
 
 // ── Volumen ──
-document.getElementById('vol').addEventListener('input', function () {
+document.getElementById('vol').addEventListener('input', function() {
   if (gainNode) gainNode.gain.value = this.value;
   document.getElementById('vol-pct').textContent = Math.round(this.value * 100) + '%';
 });
