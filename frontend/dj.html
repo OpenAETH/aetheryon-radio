@@ -954,7 +954,7 @@ function formatTime(s) {
 function loadTrack(idx) {
   if (idx < 0 || idx >= state.queue.length) return;
   initAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  try { if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (_) {}
   state.currentIndex = idx;
   const track = state.queue[idx];
   audio.src = track.url;
@@ -964,7 +964,7 @@ function loadTrack(idx) {
   document.getElementById('np-title').textContent = track.name;
   renderQueue();
   if (state.playing) {
-    audio.play();
+    try { audio.play(); } catch (_) {}
     startAudioBroadcast();
   }
 }
@@ -973,20 +973,26 @@ function loadTrack(idx) {
 function startAudioBroadcast() {
   if (!state.wsConnected || !ws || !audioDestination) return;
   if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
-  const mime = getSupportedMime();
-  mediaRecorder = new MediaRecorder(audioDestination.stream, { audioBitsPerSecond: 64000, mimeType: mime });
-  mediaRecorder.ondataavailable = e => {
-    if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(e.data);
-      state.chunksOut++;
-      bytesSent += e.data.size;
-      document.getElementById('stat-chunks').textContent = state.chunksOut;
-    }
-  };
-  mediaRecorder.start(100);
-  document.getElementById('live-pill').textContent = 'ON AIR';
-  document.getElementById('live-pill').className = 'pill pill-live';
-  log('📻 Audio broadcast started', 'ok');
+  try {
+    const mime = getSupportedMime();
+    const opts = { audioBitsPerSecond: 64000 };
+    if (mime) opts.mimeType = mime;
+    mediaRecorder = new MediaRecorder(audioDestination.stream, opts);
+    mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(e.data);
+        state.chunksOut++;
+        bytesSent += e.data.size;
+        document.getElementById('stat-chunks').textContent = state.chunksOut;
+      }
+    };
+    mediaRecorder.start(100);
+    document.getElementById('live-pill').textContent = 'ON AIR';
+    document.getElementById('live-pill').className = 'pill pill-live';
+    log('📻 Audio broadcast started', 'ok');
+  } catch (err) {
+    log('⚠ Broadcast error: ' + err.message, 'error');
+  }
 }
 
 function stopAudioBroadcast() {
@@ -1000,12 +1006,12 @@ function stopAudioBroadcast() {
   }
 }
 
-function togglePlay() {
+async function togglePlay() {
   initAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  try { if (audioCtx.state === 'suspended') await audioCtx.resume(); } catch (_) {}
   if (!audio.src && state.queue.length) loadTrack(0);
   if (audio.paused) {
-    audio.play();
+    try { await audio.play(); } catch (_) {}
     state.playing = true;
     document.getElementById('btn-play').textContent = '⏸ PAUSE';
     startAudioBroadcast();
@@ -1090,7 +1096,7 @@ async function toggleMic() {
 
       // Route mic into audioContext so it broadcasts with the audio mix
       initAudioCtx();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+      try { if (audioCtx.state === 'suspended') await audioCtx.resume(); } catch (_) {}
       micSource = audioCtx.createMediaStreamSource(micStream);
       micSource.connect(audioDestination);
 
@@ -1100,17 +1106,23 @@ async function toggleMic() {
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
           mediaRecorder.stop(); mediaRecorder = null;
         }
-        const opts = { audioBitsPerSecond: 64000, mimeType: getSupportedMime() };
-        mediaRecorder = new MediaRecorder(audioDestination.stream, opts);
-        mediaRecorder.ondataavailable = e => {
-          if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(e.data);
-            state.chunksOut++;
-            bytesSent += e.data.size;
-            document.getElementById('stat-chunks').textContent = state.chunksOut;
-          }
-        };
-        mediaRecorder.start(100);
+        try {
+          const mime = getSupportedMime();
+          const opts = { audioBitsPerSecond: 64000 };
+          if (mime) opts.mimeType = mime;
+          mediaRecorder = new MediaRecorder(audioDestination.stream, opts);
+          mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(e.data);
+              state.chunksOut++;
+              bytesSent += e.data.size;
+              document.getElementById('stat-chunks').textContent = state.chunksOut;
+            }
+          };
+          mediaRecorder.start(100);
+        } catch (err) {
+          log('⚠ Mic broadcast error: ' + err.message, 'error');
+        }
       }
 
       state.micLive = true;
@@ -1157,7 +1169,7 @@ document.getElementById('btn-mic').addEventListener('click', toggleMic);
 
 function getSupportedMime() {
   const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
-  return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+  return types.find(t => MediaRecorder.isTypeSupported(t));
 }
 
 // ═══════════════════════════════════════════════════════════

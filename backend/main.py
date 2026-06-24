@@ -80,7 +80,7 @@ async def broadcast_endpoint(ws: WebSocket):
             if listeners:
                 dead = set()
                 results = await asyncio.gather(
-                    *[l.send_bytes(chunk) for l in listeners],
+                    *[asyncio.wait_for(l.send_bytes(chunk), timeout=10) for l in listeners],
                     return_exceptions=True,
                 )
                 for listener, result in zip(list(listeners), results):

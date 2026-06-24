@@ -231,9 +231,17 @@ function initAudio() {
   mediaSource    = new MediaSource();
   audio.src      = URL.createObjectURL(mediaSource);
 
+  function getSupportedMime() {
+    var types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'];
+    for (var i = 0; i < types.length; i++) {
+      if (MediaSource.isTypeSupported(types[i])) return types[i];
+    }
+    return '';
+  }
+
   mediaSource.addEventListener('sourceopen', function () {
-    var mime = 'audio/webm;codecs=opus';
-    if (!MediaSource.isTypeSupported(mime)) { setStatus('CODEC NO SOPORTADO', ''); return; }
+    var mime = getSupportedMime();
+    if (!mime) { setStatus('CODEC NO SOPORTADO', ''); return; }
     sourceBuffer      = mediaSource.addSourceBuffer(mime);
     sourceBuffer.mode = 'sequence';
     sourceBuffer.addEventListener('updateend', appendNext);
@@ -246,13 +254,16 @@ function initAudio() {
 
 function appendNext() {
   if (!queue.length || !sourceBuffer || sourceBuffer.updating) return;
+  var chunk = queue[0];
   try {
-    sourceBuffer.appendBuffer(queue.shift());
+    sourceBuffer.appendBuffer(chunk);
+    queue.shift();
   } catch (e) {
-    if (sourceBuffer.buffered.length) {
+    queue.shift();
+    if (sourceBuffer.buffered && sourceBuffer.buffered.length) {
       var s = sourceBuffer.buffered.start(0);
       var e2 = sourceBuffer.buffered.end(0);
-      if (e2 - s > 10) sourceBuffer.remove(s, s + 5);
+      if (e2 - s > 30) sourceBuffer.remove(s, s + 10);
     }
   }
 }
