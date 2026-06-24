@@ -738,7 +738,7 @@ header {
       </div>
       <div class="config-row">
         <div class="config-label">Listener URL</div>
-        <input type="text" class="config-input" id="listener-url" value="http://localhost:8000/listen" placeholder="ws://host:8000/listen">
+        <input type="text" class="config-input" id="listener-url" value="ws://localhost:8000/listen" placeholder="ws://host:8000/listen">
       </div>
       <button class="btn-connect" id="btn-connect">CONNECT</button>
     </div>
@@ -1137,11 +1137,16 @@ async function toggleMic() {
   } else {
     if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
     if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (micSource) { try { micSource.disconnect(); } catch(_){} micSource = null; }
     state.micLive = false;
     document.getElementById('btn-mic').classList.remove('live');
     document.getElementById('btn-mic').innerHTML = '<span class="mic-dot"></span> GO LIVE';
-    document.getElementById('live-pill').textContent = 'OFF AIR';
-    document.getElementById('live-pill').className = 'pill pill-off';
+    if (state.playing && state.wsConnected) {
+      startAudioBroadcast();
+    } else {
+      document.getElementById('live-pill').textContent = 'OFF AIR';
+      document.getElementById('live-pill').className = 'pill pill-off';
+    }
     document.getElementById('mic-level-fill').style.width = '0%';
     document.getElementById('mic-status').textContent = 'MIC OFF';
     log('🎙️ Mic off', 'info');
@@ -1173,6 +1178,8 @@ function connectWS() {
     document.getElementById('ws-pill').className     = 'pill pill-on';
     document.getElementById('stat-status').textContent = 'CONNECTED';
     log('✓ Connected to server', 'ok');
+    // Si ya hay música sonando o el mic está live, empezar a transmitir
+    if (state.playing || state.micLive) startAudioBroadcast();
     // Poll stats
     statusInterval = setInterval(fetchStats, 3000);
     bitrateTimer   = setInterval(calcBitrate, 1000);
@@ -1184,6 +1191,7 @@ function connectWS() {
     document.getElementById('ws-pill').textContent = 'WS OFFLINE';
     document.getElementById('ws-pill').className   = 'pill pill-off';
     document.getElementById('stat-status').textContent = 'OFFLINE';
+    stopAudioBroadcast();
     clearInterval(statusInterval);
     clearInterval(bitrateTimer);
     log('✗ Disconnected', 'warn');
@@ -1192,6 +1200,7 @@ function connectWS() {
 }
 
 function disconnectWS() {
+  stopAudioBroadcast();
   if (ws) ws.close();
 }
 
@@ -1236,7 +1245,7 @@ function log(msg, type='info') {
 // ═══════════════════════════════════════════════════════════
 function updateListenerLink() {
   const base = document.getElementById('listener-url').value || 'localhost:8000';
-  const link = `listener.html?server=${encodeURIComponent(base)}`;
+  const link = `../index.html?server=${encodeURIComponent(base)}`;
   document.getElementById('listener-link-text').textContent = link;
 }
 document.getElementById('listener-url').addEventListener('input', updateListenerLink);
