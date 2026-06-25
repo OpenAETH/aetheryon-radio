@@ -74,6 +74,13 @@ listeners: Dict[WebSocket, float] = {}
 dj_ws: Optional[WebSocket] = None   # WS activo del DJ (solo uno)
 dj_connected: bool = False
 
+# Init segment WebM: primer chunk binario del stream.
+# Contiene el EBML header + bloque Tracks (codec, sample rate, canales).
+# Sin él, un SourceBuffer que recibe chunks del medio del stream
+# no puede decodificar nada → silencio sin error visible.
+# Se envía a cada oyente que llega tarde, antes del fan-out normal.
+init_segment: Optional[bytes] = None
+
 start_time = time.time()
 
 stats = {
@@ -202,7 +209,7 @@ async def broadcast_endpoint(ws: WebSocket):
     - Acepta bytes (chunks de audio) y texto (pings) sin romper.
     - Si ya hay un DJ activo, le hace kick al anterior.
     """
-    global dj_ws, dj_connected
+    global dj_ws, dj_connected, init_segment
 
     await ws.accept()
 
@@ -216,6 +223,7 @@ async def broadcast_endpoint(ws: WebSocket):
 
     dj_ws       = ws
     dj_connected = True
+    init_segment = None   # nueva sesión DJ → nuevo stream WebM → resetear init segment
     stats["dj_sessions"] += 1
     logger.info(f"🎙️  DJ connected (session #{stats['dj_sessions']}). Listeners: {len(listeners)}")
 
@@ -243,6 +251,12 @@ async def broadcast_endpoint(ws: WebSocket):
             stats["chunks_relayed"] += 1
             stats["bytes_relayed"]  += len(chunk)
 
+            # El primer chunk binario de cada sesión DJ es el init segment WebM.
+            # Lo guardamos para enviárselo a oyentes que lleguen tarde.
+            if init_segment is None:
+                init_segment = bytes(chunk)
+                logger.info(f"📦  Init segment captured ({len(init_segment)} bytes)")
+
             await fanout(chunk)
 
             # Actualizar peak
@@ -258,6 +272,7 @@ async def broadcast_endpoint(ws: WebSocket):
         if dj_ws is ws:
             dj_ws        = None
             dj_connected = False
+            init_segment = None   # DJ desconectado → limpiar init segment
         logger.info(f"🎙️  DJ session ended. Chunks relayed: {stats['chunks_relayed']}")
 
 
@@ -279,6 +294,20 @@ async def listen_endpoint(ws: WebSocket):
         return
 
     await ws.accept()
+
+    # Si el DJ ya está transmitiendo, enviar el init segment primero.
+    # Sin esto, el SourceBuffer del oyente recibe chunks del medio del
+    # stream WebM sin el header EBML+Tracks → no puede decodificar nada.
+    if init_segment is not None:
+        try:
+            await asyncio.wait_for(ws.send_bytes(init_segment), timeout=5)
+            logger.info("📦  Init segment sent to late-joining listener")
+        except Exception as e:
+            logger.warning(f"👂  Failed to send init segment: {e}")
+            try: await ws.close()
+            except Exception: pass
+            return
+
     listeners[ws] = time.time()
     count = len(listeners)
     if count > stats["listeners_peak"]:
