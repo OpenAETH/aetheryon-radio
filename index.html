@@ -253,17 +253,23 @@ function getSupportedMime() {
 }
 
 function appendNext() {
+  // sbReady se pone false en teardownAudio() — guard principal
   if (!sbReady || !sourceBuffer || sourceBuffer.updating || queue.length === 0) return;
+  // Verificar que el MediaSource sigue abierto antes de tocar el SourceBuffer
+  if (!mediaSource || mediaSource.readyState !== 'open') return;
   try {
     sourceBuffer.appendBuffer(queue.shift());
   } catch(e) {
-    // QuotaExceededError: limpiar buffer viejo y reintentar
-    if (sourceBuffer.buffered && sourceBuffer.buffered.length) {
-      var s = sourceBuffer.buffered.start(0);
-      var end = sourceBuffer.buffered.end(0);
-      if (end - s > 20) {
-        try { sourceBuffer.remove(s, s + 10); } catch(_) {}
-      }
+    // Solo intentar limpiar si el SB sigue adjunto al MediaSource
+    if (e.name === 'QuotaExceededError' && mediaSource && mediaSource.readyState === 'open') {
+      try {
+        var buffered = sourceBuffer.buffered;
+        if (buffered.length) {
+          var s = buffered.start(0);
+          var end = buffered.end(0);
+          if (end - s > 20) sourceBuffer.remove(s, s + 10);
+        }
+      } catch(_) {}
     }
   }
 }
@@ -317,9 +323,16 @@ function initAudio() {
 }
 
 function teardownAudio() {
+  // Bajar el flag PRIMERO — cualquier updateend o onmessage en vuelo
+  // encontrará sbReady=false y saldrá sin tocar el SourceBuffer
   sbReady = false;
-  sourceBuffer = null;
-  queue = [];
+  queue   = [];
+
+  // Remover el listener de updateend antes de soltar la referencia
+  if (sourceBuffer) {
+    try { sourceBuffer.removeEventListener('updateend', appendNext); } catch(_) {}
+    sourceBuffer = null;
+  }
 
   if (mediaSource) {
     try { if (mediaSource.readyState === 'open') mediaSource.endOfStream(); } catch(_) {}
