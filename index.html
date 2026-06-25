@@ -106,14 +106,13 @@ canvas {
   border-radius:2px;
   transition:all .2s;
   margin-bottom:20px;
-  /* Critical for mobile touch response */
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .btn-listen:hover  { background:var(--cyan-dim); }
 .btn-listen.active { border-color:var(--amber); color:var(--amber); }
 .vol-row {
-  display:flex; align-items:center; gap:12px; margin-bottom:28px;
+  display:flex; align-items:center; gap:12px; margin-bottom:8px;
 }
 .vol-label { font-size:9px; letter-spacing:2px; color:var(--muted); white-space:nowrap; }
 #vol {
@@ -123,9 +122,8 @@ canvas {
 #vol::-webkit-slider-thumb {
   -webkit-appearance:none; width:20px; height:20px;
   border-radius:50%; background:var(--cyan); box-shadow:0 0 6px var(--cyan);
-  /* Larger touch target on mobile */
 }
-.server-row { display:flex; gap:8px; align-items:center; }
+.server-row { display:flex; gap:8px; align-items:center; margin-top:20px; }
 .server-row input {
   flex:1; background:var(--surface);
   border:1px solid var(--border); color:var(--text);
@@ -141,30 +139,6 @@ canvas {
   touch-action: manipulation;
 }
 .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
-.listener-count { margin-top:16px; font-size:10px; color:var(--muted); letter-spacing:2px; }
-.listener-count span { color:var(--cyan); }
-
-/* Buffer indicator */
-.buffer-bar {
-  height:2px;
-  background:var(--border);
-  border-radius:1px;
-  margin-top:12px;
-  overflow:hidden;
-}
-.buffer-fill {
-  height:100%;
-  width:0%;
-  background:linear-gradient(90deg,var(--cyan),var(--amber));
-  border-radius:1px;
-  transition:width .3s ease;
-}
-.buffer-label {
-  font-size:9px;
-  color:var(--muted);
-  letter-spacing:2px;
-  margin-top:4px;
-}
 </style>
 </head>
 <body>
@@ -177,44 +151,36 @@ canvas {
     <div class="dot" id="dot"></div>
     <span id="status-text">DISCONNECTED</span>
   </div>
-  <button class="btn-listen" id="btn-listen">▶ TUNE IN</button>
+  <button class="btn-listen" id="btn-listen">&#9654; TUNE IN</button>
   <div class="vol-row">
     <span class="vol-label">VOL</span>
     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
     <span class="vol-label" id="vol-pct">80%</span>
   </div>
   <div class="server-row">
-    <input type="text" id="server-input" placeholder="wss://host:port/listen">
+    <input type="text" id="server-input" placeholder="wss://host/listen">
     <button class="btn-mini" id="btn-set">SET</button>
   </div>
-  <div class="buffer-bar"><div class="buffer-fill" id="buffer-fill"></div></div>
-  <div class="buffer-label" id="buffer-label">BUFFER: —</div>
-  <div class="listener-count">Oyentes: <span id="count">—</span></div>
 </div>
 
 <script>
-// ══════════════════════════════════════════════════════════════
-//  AETHERYON RADIO — Listener v2 (Mobile-compatible)
+// =====================================================
+//  AETHERYON RADIO - Listener v3
 //
-//  CAMBIO CLAVE vs v1:
-//  v1 usaba MediaSource Extensions (MSE) — no funciona en mobile
-//  porque:
-//    1. AudioContext queda suspended sin interacción directa
-//    2. MediaSource.sourceopen no dispara en <audio> off-DOM
-//    3. autoplay bloqueado en iOS/Android Chrome
+//  v1 bug: <audio> off-DOM  → sourceopen nunca dispara en mobile
+//  v2 bug: decodeAudioData no decodifica chunks WebM individuales
+//          (WebM necesita el init segment = primeros bytes del stream)
 //
-//  v2 usa decodeAudioData() + AudioBufferSourceNode scheduling:
-//    - 100% Web Audio API, sin MSE
-//    - El AudioContext se resume() en el mismo click handler
-//    - Funciona en Chrome mobile, Safari iOS, Firefox Android
-//    - Prebuffer configurable para absorber jitter del tunnel
-// ══════════════════════════════════════════════════════════════
+//  v3 fix:
+//    1. <audio> se agrega al DOM  → sourceopen dispara correctamente
+//    2. AudioContext + resume()   → dentro del click handler (mobile policy)
+//    3. audioEl.playsInline       → iOS no fuerza fullscreen
+//    4. audioEl.play()            → llamado explícitamente post-sourceopen
+//    5. MSE se mantiene          → correcto para streaming de chunks WebM
+// =====================================================
 
-// ── Config ──
-var PREBUFFER_CHUNKS = 3;    // chunks a acumular antes de empezar a sonar
-var PING_INTERVAL    = 20000; // ms entre pings keepalive
+var PING_INTERVAL = 20000;
 
-// ── toWS ──
 function toWS(raw) {
   var s = String(raw || '').trim();
   if (!s) return '';
@@ -224,29 +190,23 @@ function toWS(raw) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
 }
 
-// ── URL desde ?server= ──
 var rawParam  = new URLSearchParams(location.search).get('server') || '';
 var serverUrl = toWS(rawParam);
 document.getElementById('server-input').value = serverUrl;
 
-// ── Estado global ──
 var ws          = null;
 var audioCtx    = null;
 var analyser    = null;
 var gainNode    = null;
 var isListening = false;
 var pingTimer   = null;
-var countTimer  = null;
+var audioEl     = null;
+var mediaSource = null;
+var sourceBuffer = null;
+var sbReady     = false;
+var queue       = [];
 
-// Cola de decodificación: ArrayBuffer[] pendientes
-var chunkQueue     = [];
-// Cola de reproducción: { buffer, scheduledAt }
-var playQueue      = [];
-var nextPlayTime   = 0;   // cuando reproducir el siguiente chunk
-var prebufferCount = 0;   // chunks acumulados antes de arrancar
-var playing        = false;
-
-// ── Canvas visualizador ──
+// Canvas
 var canvas = document.getElementById('viz');
 var ctx2d  = canvas.getContext('2d');
 canvas.width  = canvas.offsetWidth || 340;
@@ -259,7 +219,7 @@ function drawViz() {
     ctx2d.fillRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  var d  = new Uint8Array(analyser.frequencyBinCount);
+  var d = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(d);
   ctx2d.fillStyle = 'rgba(4,4,10,0.4)';
   ctx2d.fillRect(0, 0, canvas.width, canvas.height);
@@ -272,198 +232,171 @@ function drawViz() {
 }
 drawViz();
 
-// ── UI helpers ──
 function setStatus(text, cls) {
   document.getElementById('status-text').textContent = text;
   document.getElementById('dot').className = 'dot' + (cls ? ' ' + cls : '');
 }
 
-function setBuffer(n, total) {
-  var pct = total > 0 ? Math.min((n / total) * 100, 100) : 0;
-  document.getElementById('buffer-fill').style.width = pct + '%';
-  document.getElementById('buffer-label').textContent =
-    n >= total ? 'BUFFER: LISTO' : 'BUFFER: ' + n + '/' + total;
+function getSupportedMime() {
+  var types = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4'
+  ];
+  for (var i = 0; i < types.length; i++) {
+    if (MediaSource.isTypeSupported(types[i])) return types[i];
+  }
+  return '';
 }
 
-// ── Audio Engine (Web Audio API puro, sin MSE) ──
-function initAudioCtx() {
-  // CRÍTICO: crear el AudioContext dentro del mismo event handler del click
-  // para que mobile lo considere activado por gesto de usuario
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function appendNext() {
+  if (!sbReady || !sourceBuffer || sourceBuffer.updating || queue.length === 0) return;
+  try {
+    sourceBuffer.appendBuffer(queue.shift());
+  } catch(e) {
+    // QuotaExceededError: limpiar buffer viejo y reintentar
+    if (sourceBuffer.buffered && sourceBuffer.buffered.length) {
+      var s = sourceBuffer.buffered.start(0);
+      var end = sourceBuffer.buffered.end(0);
+      if (end - s > 20) {
+        try { sourceBuffer.remove(s, s + 10); } catch(_) {}
+      }
+    }
+  }
+}
+
+function initAudio() {
+  teardownAudio();
+
+  // MOBILE FIX 1: AudioContext creado dentro del click handler
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // MOBILE FIX 2: resume() explícito — Chrome mobile suspende por defecto
+  audioCtx.resume();
+
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   gainNode = audioCtx.createGain();
   gainNode.gain.value = parseFloat(document.getElementById('vol').value);
   gainNode.connect(analyser);
   analyser.connect(audioCtx.destination);
-}
 
-function resumeCtx() {
-  // Mobile puede suspender el contexto; lo reactivamos explícitamente
-  if (audioCtx && audioCtx.state === 'suspended') {
-    return audioCtx.resume();
-  }
-  return Promise.resolve();
-}
+  // MOBILE FIX 3: <audio> EN EL DOM
+  // off-DOM → mediaSource.sourceopen nunca dispara en Chrome/Safari mobile
+  audioEl = document.createElement('audio');
+  audioEl.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+  audioEl.playsInline = true;  // MOBILE FIX 4: iOS no fullscreen
+  document.body.appendChild(audioEl);
 
-// Decodifica un ArrayBuffer y lo encola para reproducción
-function processChunk(arrayBuffer) {
-  if (!audioCtx) return;
+  var mediaSrc = audioCtx.createMediaElementSource(audioEl);
+  mediaSrc.connect(gainNode);
 
-  // Copiar el buffer antes de decodificar (decodeAudioData consume el original)
-  var copy = arrayBuffer.slice(0);
+  mediaSource = new MediaSource();
+  audioEl.src = URL.createObjectURL(mediaSource);
 
-  audioCtx.decodeAudioData(copy, function(audioBuffer) {
-    chunkQueue.push(audioBuffer);
-    prebufferCount++;
-    setBuffer(prebufferCount, PREBUFFER_CHUNKS);
-
-    // Arrancar reproducción una vez acumulado el prebuffer
-    if (!playing && prebufferCount >= PREBUFFER_CHUNKS) {
-      playing = true;
-      nextPlayTime = audioCtx.currentTime + 0.05; // pequeño offset de arranque
-      flushQueue();
-    } else if (playing) {
-      flushQueue();
+  mediaSource.addEventListener('sourceopen', function() {
+    var mime = getSupportedMime();
+    if (!mime) { setStatus('CODEC NO SOPORTADO', ''); return; }
+    try {
+      sourceBuffer = mediaSource.addSourceBuffer(mime);
+      sourceBuffer.mode = 'sequence';
+      sourceBuffer.addEventListener('updateend', appendNext);
+      sbReady = true;
+      // MOBILE FIX 5: play() explícito post-sourceopen
+      audioEl.play().catch(function() {});
+      appendNext();
+    } catch(e) {
+      setStatus('MSE ERROR', '');
+      console.error(e);
     }
-  }, function(err) {
-    // Chunk indecodificable (ej: header de WebM incompleto al inicio)
-    // Simplemente descartamos — el siguiente chunk incluirá info suficiente
-    console.warn('[AETHERYON] decodeAudioData skip:', err);
   });
 }
 
-// Programa todos los chunks pendientes en el timeline de AudioContext
-function flushQueue() {
-  while (chunkQueue.length > 0) {
-    var buf    = chunkQueue.shift();
-    var source = audioCtx.createBufferSource();
-    source.buffer = buf;
-    source.connect(gainNode);
+function teardownAudio() {
+  sbReady = false;
+  sourceBuffer = null;
+  queue = [];
 
-    // Scheduling preciso: cada chunk se programa para justo después del anterior
-    // Esto elimina gaps y clicks entre chunks
-    var startAt = Math.max(nextPlayTime, audioCtx.currentTime);
-    source.start(startAt);
-    nextPlayTime = startAt + buf.duration;
+  if (mediaSource) {
+    try { if (mediaSource.readyState === 'open') mediaSource.endOfStream(); } catch(_) {}
+    mediaSource = null;
+  }
+  if (audioEl) {
+    audioEl.pause();
+    audioEl.src = '';
+    if (audioEl.parentNode) audioEl.parentNode.removeChild(audioEl);
+    audioEl = null;
   }
 }
 
-// Reset completo del engine de audio (sin cerrar el AudioContext)
-function resetAudioEngine() {
-  chunkQueue     = [];
-  prebufferCount = 0;
-  playing        = false;
-  nextPlayTime   = 0;
-  setBuffer(0, PREBUFFER_CHUNKS);
-}
-
-// ── WebSocket ──
 function connect() {
   var url = toWS(serverUrl);
   if (!url) { setStatus('INGRESA URL DEL SERVIDOR', ''); return; }
 
-  setStatus('CONECTANDO…', '');
+  setStatus('CONECTANDO...', '');
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = function() {
-    setStatus('CONECTADO — ESPERANDO DJ', 'connected');
-    // Keepalive ping para el watchdog del servidor
+    setStatus('CONECTADO - ESPERANDO DJ', 'connected');
     pingTimer = setInterval(function() {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, PING_INTERVAL);
-    // Poll oyentes
-    countTimer = setInterval(fetchCount, 5000);
   };
 
   ws.onmessage = function(e) {
-    // Ignorar frames de texto (pong, etc.)
     if (typeof e.data === 'string') return;
-
     setStatus('EN VIVO', 'live');
-
-    // ── PUNTO CLAVE ──
-    // En v1: queue.push(e.data) → sourceBuffer.appendBuffer()  [MSE, roto en mobile]
-    // En v2: processChunk()     → decodeAudioData() → AudioBufferSourceNode [funciona en mobile]
-    resumeCtx().then(function() {
-      processChunk(e.data);
-    });
+    queue.push(e.data);
+    appendNext();
   };
 
   ws.onclose = function() {
     setStatus('DESCONECTADO', '');
     clearInterval(pingTimer);
-    clearInterval(countTimer);
-    // Si el DJ se va, resetear buffer para próxima sesión
-    resetAudioEngine();
   };
 
   ws.onerror = function() {
-    setStatus('ERROR DE CONEXIÓN', '');
+    setStatus('ERROR DE CONEXION', '');
   };
 }
 
 function disconnect() {
   clearInterval(pingTimer);
-  clearInterval(countTimer);
   if (ws) { ws.close(); ws = null; }
-  resetAudioEngine();
+  teardownAudio();
 }
 
-// ── Fetch oyentes activos ──
-function fetchCount() {
-  try {
-    // Derivar URL HTTP del status desde la WS URL del listener
-    var httpBase = serverUrl
-      .replace('wss://','https://')
-      .replace('ws://','http://')
-      .replace('/listen','');
-    fetch(httpBase + '/status')
-      .then(function(r){ return r.json(); })
-      .then(function(d){ document.getElementById('count').textContent = d.listeners; })
-      .catch(function(){});
-  } catch(_) {}
-}
-
-// ── Botón principal ──
 document.getElementById('btn-listen').addEventListener('click', function() {
   if (!isListening) {
     isListening = true;
-    this.textContent = '⏹ DESCONECTAR';
+    this.textContent = '\u23F9 DESCONECTAR';
     this.classList.add('active');
-
-    // CRÍTICO MOBILE: initAudioCtx() debe llamarse AQUÍ, dentro del
-    // mismo handler del evento click/touch, para que el browser lo
-    // considere activado por interacción de usuario.
-    // Si lo llamás en un callback asíncrono (setTimeout, ws.onmessage, etc.)
-    // mobile lo suspende inmediatamente.
-    initAudioCtx();
-
-    // Resume explícito por si el contexto ya existía suspendido
-    resumeCtx().then(function() { connect(); });
+    initAudio();   // DENTRO del click - obligatorio para mobile
+    connect();
   } else {
     isListening = false;
-    this.textContent = '▶ TUNE IN';
+    this.textContent = '\u25B6 TUNE IN';
     this.classList.remove('active');
     disconnect();
     setStatus('DISCONNECTED', '');
   }
 });
 
-// ── Botón SET ──
 document.getElementById('btn-set').addEventListener('click', function() {
   serverUrl = toWS(document.getElementById('server-input').value.trim());
   document.getElementById('server-input').value = serverUrl;
   if (isListening) {
     disconnect();
-    // AudioContext ya existe y está activo — no recrear
-    resumeCtx().then(function() { connect(); });
+    initAudio();
+    connect();
   }
 });
 
-// ── Volumen ──
 document.getElementById('vol').addEventListener('input', function() {
   if (gainNode) gainNode.gain.value = this.value;
   document.getElementById('vol-pct').textContent = Math.round(this.value * 100) + '%';
