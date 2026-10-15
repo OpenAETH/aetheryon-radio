@@ -16,7 +16,7 @@ from typing import Dict, Optional, Tuple
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -36,6 +36,10 @@ logger = logging.getLogger("aetheryon-radio")
 CORS_HEADERS = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*"}
 app = FastAPI(title="AETHERYON Radio Server", version="3.0-autodj")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+APP_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = APP_DIR if (APP_DIR / "index.html").is_file() else APP_DIR.parent
+LISTENER_HTML = PROJECT_DIR / "index.html"
+DJ_HTML = PROJECT_DIR / "frontend" / "dj.html"
 
 listeners: Dict[WebSocket, float] = {}
 dj_ws: Optional[WebSocket] = None
@@ -341,9 +345,14 @@ async def shutdown() -> None:
 
 @app.get("/")
 async def root():
-    return JSONResponse({"service": "AETHERYON Radio", "version": "3.0-autodj", "status": "online",
-                         "source": active_source, "dj_online": dj_connected, "listeners": len(listeners),
-                         "uptime_s": round(time.time() - start_time), "stats": stats}, headers=CORS_HEADERS)
+    """Serve the listener UI from the same origin as the WebSocket stream."""
+    return FileResponse(LISTENER_HTML, media_type="text/html")
+
+
+@app.get("/dj")
+async def dj_page():
+    """Serve the DJ panel from the same origin as the broadcast WebSocket."""
+    return FileResponse(DJ_HTML, media_type="text/html")
 
 
 @app.get("/status")

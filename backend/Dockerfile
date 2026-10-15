@@ -8,6 +8,8 @@ WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/main.py ./main.py
+COPY index.html ./index.html
+COPY frontend/dj.html ./frontend/dj.html
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -152,7 +152,7 @@ canvas {
     <div class="dot" id="dot"></div>
     <span id="status-text">DISCONNECTED</span>
   </div>
-  <button class="btn-listen" id="btn-listen">&#9654; TUNE IN</button>
+  <button class="btn-listen" id="btn-listen">&#9654; ACTIVAR AUDIO</button>
   <div class="vol-row">
     <span class="vol-label">VOL</span>
     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
@@ -191,15 +191,20 @@ function toWS(raw) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
 }
 
-var rawParam  = new URLSearchParams(location.search).get('server') || '';
-var serverUrl = toWS(rawParam);
+var rawParam = new URLSearchParams(location.search).get('server') || '';
+function sameOriginWS(path) {
+  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + path;
+}
+// Radio Default: the listener UI is served by the radio server itself, so no
+// DJ/tunnel URL needs to be entered. ?server=... remains an optional override.
+var serverUrl = toWS(rawParam) || sameOriginWS('/listen');
 document.getElementById('server-input').value = serverUrl;
 
 var ws          = null;
 var audioCtx    = null;
 var analyser    = null;
 var gainNode    = null;
-var isListening = false;
+var audioEnabled = false;
 var pingTimer   = null;
 var audioEl     = null;
 var mediaSource = null;
@@ -343,15 +348,13 @@ function teardownAudio() {
 }
 
 function connect() {
-  var url = toWS(serverUrl);
-  if (!url) { setStatus('INGRESA URL DEL SERVIDOR', ''); return; }
-
-  setStatus('CONECTANDO...', '');
+  var url = toWS(serverUrl) || sameOriginWS('/listen');
+  setStatus('CONECTANDO RADIO DEFAULT...', '');
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = function() {
-    setStatus('CONECTADO - ESPERANDO DJ', 'connected');
+    setStatus('CONECTADO - RADIO DEFAULT', 'connected');
     pingTimer = setInterval(function() {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, PING_INTERVAL);
@@ -396,30 +399,38 @@ function disconnect() {
 }
 
 document.getElementById('btn-listen').addEventListener('click', function() {
-  if (!isListening) {
-    isListening = true;
-    this.textContent = '\u23F9 DESCONECTAR';
+  // Browsers may block audible autoplay. The WebSocket and playlist are already
+  // connected; this gesture only unlocks/resumes audio playback.
+  if (!audioEnabled) {
+    audioEnabled = true;
+    this.textContent = '\u23F8 SILENCIAR';
     this.classList.add('active');
-    initAudio();   // DENTRO del click - obligatorio para mobile
-    connect();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioEl) audioEl.play().catch(function() {
+      setStatus('PULSÁ PARA HABILITAR AUDIO', 'connected');
+    });
   } else {
-    isListening = false;
-    this.textContent = '\u25B6 TUNE IN';
+    audioEnabled = false;
+    this.textContent = '\u25B6 ACTIVAR AUDIO';
     this.classList.remove('active');
-    disconnect();
-    setStatus('DISCONNECTED', '');
+    if (audioEl) audioEl.pause();
   }
 });
 
 document.getElementById('btn-set').addEventListener('click', function() {
-  serverUrl = toWS(document.getElementById('server-input').value.trim());
+  var entered = document.getElementById('server-input').value.trim();
+  serverUrl = toWS(entered) || sameOriginWS('/listen');
   document.getElementById('server-input').value = serverUrl;
-  if (isListening) {
-    disconnect();
-    initAudio();
-    connect();
-  }
+  disconnect();
+  initAudio();
+  connect();
+  if (audioEnabled && audioCtx) audioCtx.resume();
 });
+
+// Connect to the playlist as soon as Bubble opens. Audio playback itself may
+// still need the user's first tap/click due to browser autoplay restrictions.
+initAudio();
+connect();
 
 document.getElementById('vol').addEventListener('input', function() {
   if (gainNode) gainNode.gain.value = this.value;
