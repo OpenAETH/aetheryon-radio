@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -205,6 +206,8 @@ var mediaSource = null;
 var sourceBuffer = null;
 var sbReady     = false;
 var queue       = [];
+var currentMime = 'audio/webm;codecs="opus"';
+var currentSession = null;
 
 // Canvas
 var canvas = document.getElementById('viz');
@@ -238,16 +241,9 @@ function setStatus(text, cls) {
 }
 
 function getSupportedMime() {
-  var types = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-    'audio/mp4;codecs=mp4a.40.2',
-    'audio/mp4'
-  ];
-  for (var i = 0; i < types.length; i++) {
-    if (MediaSource.isTypeSupported(types[i])) return types[i];
+  var candidates = [currentMime, 'audio/webm;codecs=opus', 'audio/webm'];
+  for (var i = 0; i < candidates.length; i++) {
+    if (candidates[i] && MediaSource.isTypeSupported(candidates[i])) return candidates[i];
   }
   return '';
 }
@@ -309,7 +305,7 @@ function initAudio() {
     if (!mime) { setStatus('CODEC NO SOPORTADO', ''); return; }
     try {
       sourceBuffer = mediaSource.addSourceBuffer(mime);
-      sourceBuffer.mode = 'sequence';
+      sourceBuffer.mode = 'segments';
       sourceBuffer.addEventListener('updateend', appendNext);
       sbReady = true;
       // MOBILE FIX 5: play() explícito post-sourceopen
@@ -362,7 +358,22 @@ function connect() {
   };
 
   ws.onmessage = function(e) {
-    if (typeof e.data === 'string') return;
+    if (typeof e.data === 'string') {
+      var control;
+      try { control = JSON.parse(e.data); } catch (_) { return; }
+      if (control.type === 'stream_start') {
+        // New session/source: invalidate old MSE queue before accepting any bytes.
+        currentSession = control.session_id;
+        currentMime = control.mime || 'audio/webm;codecs="opus"';
+        teardownAudio();
+        initAudio();
+        setStatus('SINCRONIZANDO STREAM...', 'connected');
+      } else if (control.type === 'waiting') {
+        setStatus('ESPERANDO TRANSMISION', 'connected');
+      }
+      return;
+    }
+    if (!sbReady && !mediaSource) return;
     setStatus('EN VIVO', 'live');
     queue.push(e.data);
     appendNext();

@@ -1,16 +1,22 @@
-version: "3.9"
-
 services:
   radio-server:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: aetheryon-radio
     ports:
       - "8001:8000"
     restart: unless-stopped
     environment:
-      - PYTHONUNBUFFERED=1
+      PYTHONUNBUFFERED: "1"
+      AUTODJ_ENABLED: "true"
+      AUTODJ_PLAYLIST: /music/playlist.txt
+      AUTODJ_RESTART_DELAY: "3"
+      MUSIC_DIR: /music
+    volumes:
+      - ./music:/music:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 3
