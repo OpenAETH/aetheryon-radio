@@ -1,0 +1,21 @@
+{
+  // Reemplaza el Worker estatico actual (mismo nombre => misma URL workers.dev).
+  "name": "aetheryon-radio",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-10-13",
+  "observability": { "enabled": true },
+
+  "containers": [
+    {
+      "class_name": "RadioContainer",
+      "image": "./backend/Dockerfile",
+      "image_build_context": ".",   // el Dockerfile copia backend/, index.html, frontend/ y music/ desde la raiz
+      "instance_type": "basic",     // libopus en tiempo real necesita mas que "lite" (1/16 vCPU)
+      "max_instances": 1            // una sola emision compartida
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "RADIO", "class_name": "RadioContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RadioContainer"] }]
+}

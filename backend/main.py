@@ -26,6 +26,8 @@ MAX_LISTENERS = int(os.getenv("MAX_LISTENERS", "200"))
 AUTODJ_ENABLED = os.getenv("AUTODJ_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 AUTODJ_PLAYLIST = Path(os.getenv("AUTODJ_PLAYLIST", "/music/playlist.txt"))
 AUTODJ_RESTART_DELAY = float(os.getenv("AUTODJ_RESTART_DELAY", "3"))
+# ffmpeg no soporta -stream_loop con el demuxer concat, asi que el bucle se arma repitiendo la playlist.
+AUTODJ_LOOP_REPEAT = max(1, int(os.getenv("AUTODJ_LOOP_REPEAT", "1000")))
 MUSIC_DIR = Path(os.getenv("MUSIC_DIR", "/music")).resolve()
 STREAM_MIME = 'audio/webm;codecs="opus"'
 
@@ -217,12 +219,20 @@ async def _publish_stream_data(session: str, framer: WebMFramer, data: bytes) ->
         await _fanout_binary(media, session=session)
 
 
+SUPPORTED_AUDIO = {".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac", ".webm"}
+
+
+def _scan_music_dir() -> list[Path]:
+    """Zero-configuration fallback: every supported audio file, in name order."""
+    if not MUSIC_DIR.is_dir():
+        return []
+    return sorted((p.resolve() for p in MUSIC_DIR.iterdir()
+                   if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO), key=lambda p: p.name.lower())
+
+
 def _load_playlist() -> list[Path]:
-    supported = {".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac", ".webm"}
     if not AUTODJ_PLAYLIST.is_file():
-        # Zero-configuration fallback: play every supported audio file in order.
-        return sorted((p.resolve() for p in MUSIC_DIR.iterdir()
-                       if p.is_file() and p.suffix.lower() in supported), key=lambda p: p.name.lower())
+        return _scan_music_dir()
     tracks = []
     for raw in AUTODJ_PLAYLIST.read_text(encoding="utf-8").splitlines():
         name = raw.strip()
@@ -233,11 +243,8 @@ def _load_playlist() -> list[Path]:
             logger.warning("AutoDJ playlist entry ignored (missing or outside music dir): %s", name)
             continue
         tracks.append(candidate)
-    if not tracks:
-        # An empty/missing playlist should not prevent a simple music/ folder from working.
-        tracks = sorted((p.resolve() for p in MUSIC_DIR.iterdir()
-                         if p.is_file() and p.suffix.lower() in supported), key=lambda p: p.name.lower())
-    return tracks
+    # An empty/invalid playlist must not prevent a plain music/ folder from working.
+    return tracks or _scan_music_dir()
 
 
 def _ffconcat_escape(path: Path) -> str:
@@ -252,17 +259,20 @@ async def _autodj_supervisor() -> None:
             continue
         tracks = _load_playlist()
         if not tracks:
+            logger.error("AutoDJ: no playable tracks found in %s (playlist=%s)", MUSIC_DIR, AUTODJ_PLAYLIST)
             await asyncio.sleep(max(AUTODJ_RESTART_DELAY, 5))
             continue
         playlist_file = Path("/tmp/aetheryon-radio-playlist.ffconcat")
-        content = "ffconcat version 1.0\n" + "".join(f"file '{_ffconcat_escape(p)}'\n" for p in tracks)
+        entries = "".join(f"file '{_ffconcat_escape(p)}'\n" for p in tracks)
+        content = "ffconcat version 1.0\n" + entries * AUTODJ_LOOP_REPEAT
         playlist_file.write_text(content, encoding="utf-8")
         session = await _begin_stream("autodj")
         framer = WebMFramer()
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-re",
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
                "-f", "concat", "-safe", "0", "-i", str(playlist_file), "-vn",
                "-c:a", "libopus", "-b:a", "96k", "-application", "audio",
                "-cluster_time_limit", "1000", "-live", "1", "-f", "webm", "pipe:1"]
+        failed = True  # solo un fin limpio de ffmpeg (EOF + exit 0) reinicia sin espera
         try:
             logger.info("AutoDJ starting with %d track(s)", len(tracks))
             autodj_process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
@@ -270,9 +280,12 @@ async def _autodj_supervisor() -> None:
             while not dj_connected and session == stream_session:
                 chunk = await autodj_process.stdout.read(8192)
                 if not chunk:
+                    await autodj_process.wait()
+                    failed = autodj_process.returncode != 0
                     break
                 await _publish_stream_data(session, framer, chunk)
             if autodj_process.returncode is None:
+                failed = False  # corte intencional (DJ en vivo o cambio de sesion)
                 autodj_process.terminate()
                 try:
                     await asyncio.wait_for(autodj_process.wait(), timeout=3)
@@ -293,7 +306,7 @@ async def _autodj_supervisor() -> None:
             autodj_process = None
         if not dj_connected:
             stats["autodj_restarts"] += 1
-            await asyncio.sleep(AUTODJ_RESTART_DELAY)
+            await asyncio.sleep(AUTODJ_RESTART_DELAY if failed else 0)
 
 
 async def _kick_dead_listeners() -> None:
@@ -371,6 +384,7 @@ async def status_options():
 @app.get("/healthz")
 async def healthz():
     return JSONResponse({"ok": True, "source": active_source, "stream_ready": stream_init is not None})
+
 
 
 @app.websocket("/broadcast")

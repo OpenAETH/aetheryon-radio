@@ -25,3 +25,8 @@ Thumbs.db
 
 # Repo Report
 repo_report--*.txt
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
+.dev.vars
