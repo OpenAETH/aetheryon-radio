@@ -296,6 +296,25 @@ function getSupportedMime() {
   return '';
 }
 
+// Un oyente que entra con la emision en curso recibe timestamps que no empiezan en 0:
+// el buffer arranca en t=start y el <audio> quedaria clavado en currentTime=0 (silencio).
+// Se salta al inicio del buffer y se recorta lo ya reproducido para no agotar la cuota.
+function onUpdateEnd() {
+  try {
+    if (audioEl && sourceBuffer && audioEl.buffered.length) {
+      var start = audioEl.buffered.start(0);
+      var cur = audioEl.currentTime;
+      if (cur + 0.05 < start) {
+        audioEl.currentTime = start;
+      } else if (cur - start > 30 && !sourceBuffer.updating) {
+        sourceBuffer.remove(start, cur - 20);
+        return;   // el remove dispara otro updateend que continua la cola
+      }
+    }
+  } catch (_) {}
+  appendNext();
+}
+
 function appendNext() {
   // sbReady se pone false en teardownAudio() — guard principal
   if (!sbReady || !sourceBuffer || sourceBuffer.updating || queue.length === 0) return;
@@ -355,7 +374,7 @@ function initAudio() {
     try {
       sourceBuffer = mediaSource.addSourceBuffer(mime);
       sourceBuffer.mode = 'segments';
-      sourceBuffer.addEventListener('updateend', appendNext);
+      sourceBuffer.addEventListener('updateend', onUpdateEnd);
       sbReady = true;
       // MOBILE FIX 5: play() explícito post-sourceopen
       audioEl.play().catch(function() {});
@@ -375,7 +394,7 @@ function teardownAudio() {
 
   // Remover el listener de updateend antes de soltar la referencia
   if (sourceBuffer) {
-    try { sourceBuffer.removeEventListener('updateend', appendNext); } catch(_) {}
+    try { sourceBuffer.removeEventListener('updateend', onUpdateEnd); } catch(_) {}
     sourceBuffer = null;
   }
 
