@@ -1,0 +1,19 @@
+# Blueprint de Render: despliega AETHERYON Radio (Listener Loop + cliente de escucha) en una URL publica estable.
+# Un WebSocket de larga duracion + AutoDJ continuo requiere una instancia siempre encendida:
+# el plan free se suspende por inactividad y cortaria la emision.
+services:
+  - type: web
+    name: aetheryon-radio
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: AUTODJ_ENABLED
+        value: "true"
+      - key: AUTODJ_PLAYLIST
+        value: /music/playlist.txt
+      - key: MUSIC_DIR
+        value: /music

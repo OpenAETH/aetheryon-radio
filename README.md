@@ -1,96 +1,45 @@
 # AETHERYON RADIO
 
-Sistema de radio online con panel DJ de browser, servidor FastAPI WebSocket en Docker, y página de oyentes.
-
----
+Radio online autonoma. El backend (FastAPI) emite una playlist en bucle (**Listener Loop**) y la distribuye por WebSocket; el cliente de escucha (`index.html`) se conecta solo a esa emision. Opcionalmente, un oyente puede sintonizar la URL publica de un DJ.
 
 ## Arquitectura
 
 ```
-DJ (dj.html)
-  └─ WebSocket ──► FastAPI :8000/broadcast
-                       └─ Fan-out ──► Listeners (listener.html)
-                                         └─ WS :8000/listen
+backend (FastAPI, desplegado)
+  ├─ AutoDJ: ffmpeg lee music/playlist.txt en bucle -> WebM/Opus
+  ├─ GET /          cliente de escucha (index.html), mismo origen que el stream
+  ├─ WS  /listen    oyentes (fan-out en memoria)
+  ├─ WS  /broadcast DJ en vivo (reemplaza al AutoDJ mientras esta conectado)
+  ├─ GET /dj        panel DJ
+  └─ GET /status, /healthz
 ```
 
----
+## Comportamiento del cliente
 
-## 1. Levantar el servidor
+1. Al abrir la URL publica se conecta a `wss://<mismo-host>/listen` (Listener Loop). No hay nada que configurar.
+2. Si el navegador bloquea el autoplay, se muestra el boton **ESCUCHAR** resaltado; un toque inicia el audio.
+3. **Opcional:** pegar la URL publica de un DJ (`wss://host/listen`, o solo `https://host`) y pulsar **SINTONIZAR**. Ese cliente reproduce al DJ en lugar de la radio propia (se recuerda en el navegador).
+4. **VOLVER A RADIO** (o vaciar el campo y pulsar SINTONIZAR) restaura el Listener Loop.
+5. Si la conexion se corta, el cliente reconecta con backoff.
+
+## Playlist
+
+Copiar los audios a `music/` y listar un archivo por linea en `music/playlist.txt`. La carpeta se incluye en la imagen Docker, por lo que el despliegue no depende de volumenes locales.
+
+## Despliegue (Render)
+
+`render.yaml` define un servicio Docker siempre encendido (`plan: starter`; el plan free se suspende y cortaria la emision) con health check en `/healthz`. Conectar el repo en Render como Blueprint y usar la URL publica resultante.
+
+## Verificacion end-to-end (entorno desplegado)
 
 ```bash
-# Desde la raíz del proyecto
-docker compose up --build -d
-
-# Ver logs
-docker compose logs -f
+curl -fsS https://<tu-servicio>/status      # autodj_enabled: true, stream_ready: true, source: "autodj"
 ```
 
-El server queda en `http://localhost:8000`
+Abrir `https://<tu-servicio>/` en un navegador limpio: debe pasar a **EN VIVO** sin configurar nada y seguir sonando tras terminar la ultima pista.
 
----
+## Desarrollo local (solo para probar)
 
-## 2. Exponer a Internet (túnel)
-
-### Opción A — ngrok (más fácil)
 ```bash
-ngrok http 8000
-# Te da: https://abc123.ngrok.io
+docker compose up --build -d   # http://localhost:8001
 ```
-
-### Opción B — Cloudflare Tunnel (gratis, sin cuenta pagada)
-```bash
-cloudflared tunnel --url http://localhost:8000
-```
-
-### Opción C — Tu propio dominio + nginx reverse proxy
-```nginx
-location /radio/ {
-    proxy_pass http://localhost:8000/;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-}
-```
-
----
-
-## 3. Usar el Panel DJ
-
-Abre `frontend/dj.html` en Chrome/Edge (Firefox tiene limitaciones con MediaRecorder+WebM).
-
-1. **Carga audios**: arrastra MP3/WAV/OGG al panel izquierdo
-2. **Conecta el servidor**: ingresa la URL WebSocket en el panel derecho
-   - Local: `ws://localhost:8000/broadcast`
-   - Con ngrok: `wss://abc123.ngrok.io/broadcast`
-3. **Reproduce música**: usa los controles de transporte
-4. **Go Live**: presiona el botón rojo para activar el micrófono y transmitir en vivo
-
----
-
-## 4. Compartir con oyentes
-
-Abre `frontend/listener.html` en cualquier browser, o comparte la URL con el parámetro:
-
-```
-listener.html?server=wss://abc123.ngrok.io/listen
-```
-
----
-
-## 5. API del servidor
-
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/` | GET | Info general |
-| `/status` | GET | Oyentes actuales, peak, chunks |
-| `/broadcast` | WebSocket | DJ envía audio aquí |
-| `/listen` | WebSocket | Oyentes reciben aquí |
-
----
-
-## Notas técnicas
-
-- El audio se transmite en chunks de **100ms** (WebM/Opus ~64kbps)
-- El servidor hace fan-out en memoria — sin disco, sin latencia de archivo
-- Latencia estimada: **300-800ms** dependiendo del túnel
-- Para producción con +100 oyentes: considera un servidor con más RAM y Icecast como relay secundario

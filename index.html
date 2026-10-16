@@ -140,6 +140,12 @@ canvas {
   touch-action: manipulation;
 }
 .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
+.source-label { font-size:9px; letter-spacing:2px; color:var(--muted); margin-top:18px; text-transform:uppercase; }
+.source-label b { color:var(--cyan); font-weight:700; }
+.btn-listen.attention { animation:attn 1.2s ease-in-out infinite; }
+@keyframes attn { 0%,100%{ box-shadow:0 0 0 0 rgba(0,245,212,.5) } 50%{ box-shadow:0 0 0 10px transparent } }
+.tap-hint { font-size:10px; letter-spacing:1px; color:var(--amber); margin:-8px 0 16px; }
+.hidden { display:none !important; }
 </style>
 </head>
 <body>
@@ -152,15 +158,18 @@ canvas {
     <div class="dot" id="dot"></div>
     <span id="status-text">DISCONNECTED</span>
   </div>
-  <button class="btn-listen" id="btn-listen">&#9654; ACTIVAR AUDIO</button>
+  <button class="btn-listen" id="btn-listen">&#9654; ESCUCHAR</button>
   <div class="vol-row">
     <span class="vol-label">VOL</span>
     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
     <span class="vol-label" id="vol-pct">80%</span>
   </div>
+  <div class="tap-hint hidden" id="tap-hint">El navegador bloqueó el audio automático: tocá para escuchar</div>
+  <div class="source-label" id="source-label">FUENTE: <b>AETHERYON RADIO</b> (LISTENER LOOP)</div>
   <div class="server-row">
-    <input type="text" id="server-input" placeholder="wss://host/listen">
-    <button class="btn-mini" id="btn-set">SET</button>
+    <input type="text" id="dj-input" placeholder="URL de DJ (opcional): wss://host/listen">
+    <button class="btn-mini" id="btn-dj-set">SINTONIZAR</button>
+    <button class="btn-mini hidden" id="btn-dj-clear">VOLVER A RADIO</button>
   </div>
 </div>
 
@@ -191,20 +200,52 @@ function toWS(raw) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
 }
 
-var rawParam = new URLSearchParams(location.search).get('server') || '';
 function sameOriginWS(path) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + path;
 }
-// Radio Default: the listener UI is served by the radio server itself, so no
-// DJ/tunnel URL needs to be entered. ?server=... remains an optional override.
-var serverUrl = toWS(rawParam) || sameOriginWS('/listen');
-document.getElementById('server-input').value = serverUrl;
+
+// Fuente por defecto: Listener Loop, emitido por el backend que sirve esta pagina.
+// Unica configuracion opcional: URL publica de un DJ (se recuerda en este navegador).
+var DJ_KEY = 'aetheryon_dj_url';
+function normalizeDj(raw) {
+  var ws = toWS(raw);
+  if (!ws) return '';
+  try {
+    var u = new URL(ws);
+    if (u.pathname === '' || u.pathname === '/') u.pathname = '/listen';
+    return u.toString();
+  } catch (_) { return ''; }
+}
+function loadDj() {
+  var fromParam = new URLSearchParams(location.search).get('server');
+  if (fromParam) return normalizeDj(fromParam);
+  try { return normalizeDj(localStorage.getItem(DJ_KEY) || ''); } catch (_) { return ''; }
+}
+function saveDj(url) {
+  try { if (url) localStorage.setItem(DJ_KEY, url); else localStorage.removeItem(DJ_KEY); } catch (_) {}
+}
+var djUrl = loadDj();
+function currentSource() { return djUrl || sameOriginWS('/listen'); }
+function renderSource() {
+  var label = document.getElementById('source-label');
+  if (djUrl) {
+    var host = '';
+    try { host = new URL(djUrl).host; } catch (_) { host = djUrl; }
+    label.innerHTML = 'FUENTE: DJ <b></b>';
+    label.querySelector('b').textContent = host;
+  } else {
+    label.innerHTML = 'FUENTE: <b>AETHERYON RADIO</b> (LISTENER LOOP)';
+  }
+  document.getElementById('btn-dj-clear').classList.toggle('hidden', !djUrl);
+  document.getElementById('dj-input').value = djUrl;
+}
 
 var ws          = null;
 var audioCtx    = null;
 var analyser    = null;
 var gainNode    = null;
-var audioEnabled = false;
+var audioEnabled = false;   // true = sonando (autoplay ok o tras un toque)
+var userMuted   = false;   // el oyente silencio explicitamente
 var pingTimer   = null;
 var audioEl     = null;
 var mediaSource = null;
@@ -213,6 +254,8 @@ var sbReady     = false;
 var queue       = [];
 var currentMime = 'audio/webm;codecs="opus"';
 var currentSession = null;
+var retryTimer  = null;
+var retryCount  = 0;
 
 // Canvas
 var canvas = document.getElementById('viz');
@@ -297,6 +340,7 @@ function initAudio() {
   audioEl = document.createElement('audio');
   audioEl.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
   audioEl.playsInline = true;  // MOBILE FIX 4: iOS no fullscreen
+  audioEl.muted = userMuted;
   document.body.appendChild(audioEl);
 
   var mediaSrc = audioCtx.createMediaElementSource(audioEl);
@@ -347,30 +391,63 @@ function teardownAudio() {
   }
 }
 
-function connect() {
-  var url = toWS(serverUrl) || sameOriginWS('/listen');
-  setStatus('CONECTANDO RADIO DEFAULT...', '');
-  ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
+function setListening(on) {
+  audioEnabled = on;
+  var btn = document.getElementById('btn-listen');
+  btn.textContent = on ? '\u23F8 SILENCIAR' : '\u25B6 ESCUCHAR';
+  btn.classList.toggle('active', on);
+  if (audioEl) audioEl.muted = !on;
+}
 
-  ws.onopen = function() {
-    setStatus('CONECTADO - RADIO DEFAULT', 'connected');
+function showTapHint(show) {
+  document.getElementById('tap-hint').classList.toggle('hidden', !show);
+  document.getElementById('btn-listen').classList.toggle('attention', !!show);
+}
+
+// Intenta reproducir; si el navegador bloquea el autoplay, muestra el control para hacerlo con un toque.
+function tryPlay() {
+  if (!audioEl) return;
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
+  audioEl.play().catch(function() {});
+  setTimeout(function() {
+    var blocked = !audioEl || audioEl.paused || !audioCtx || audioCtx.state !== 'running';
+    showTapHint(blocked && !audioEnabled && !userMuted);
+    if (!blocked && !userMuted) setListening(true);   // autoplay permitido: ya esta sonando
+  }, 400);
+}
+
+function connect() {
+  clearTimeout(retryTimer);
+  var url = currentSource();
+  setStatus(djUrl ? 'CONECTANDO AL DJ...' : 'CONECTANDO A LA RADIO...', '');
+  var sock;
+  try { sock = new WebSocket(url); } catch (e) { setStatus('URL INVALIDA', ''); return; }
+  ws = sock;
+  sock.binaryType = 'arraybuffer';
+
+  sock.onopen = function() {
+    if (ws !== sock) return;
+    retryCount = 0;
+    setStatus(djUrl ? 'CONECTADO - DJ' : 'CONECTADO - AETHERYON RADIO', 'connected');
+    clearInterval(pingTimer);
     pingTimer = setInterval(function() {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+      if (sock.readyState === WebSocket.OPEN) sock.send('ping');
     }, PING_INTERVAL);
   };
 
-  ws.onmessage = function(e) {
+  sock.onmessage = function(e) {
+    if (ws !== sock) return;
     if (typeof e.data === 'string') {
       var control;
       try { control = JSON.parse(e.data); } catch (_) { return; }
       if (control.type === 'stream_start') {
-        // New session/source: invalidate old MSE queue before accepting any bytes.
+        // Nueva sesion/fuente: invalidar la cola MSE antes de aceptar bytes.
         currentSession = control.session_id;
         currentMime = control.mime || 'audio/webm;codecs="opus"';
         teardownAudio();
         initAudio();
         setStatus('SINCRONIZANDO STREAM...', 'connected');
+        tryPlay();
       } else if (control.type === 'waiting') {
         setStatus('ESPERANDO TRANSMISION', 'connected');
       }
@@ -382,54 +459,68 @@ function connect() {
     appendNext();
   };
 
-  ws.onclose = function() {
-    setStatus('DESCONECTADO', '');
+  sock.onclose = function() {
+    if (ws !== sock) return;   // cierre intencional (cambio de fuente)
     clearInterval(pingTimer);
+    // Radio siempre disponible: reconectar con backoff (cubre reinicios/despliegues del backend).
+    var delay = Math.min(1000 * Math.pow(2, retryCount++), 15000);
+    setStatus('RECONECTANDO...', '');
+    retryTimer = setTimeout(connect, delay);
   };
 
-  ws.onerror = function() {
+  sock.onerror = function() {
+    if (ws !== sock) return;
     setStatus('ERROR DE CONEXION', '');
   };
 }
 
 function disconnect() {
+  clearTimeout(retryTimer);
   clearInterval(pingTimer);
-  if (ws) { ws.close(); ws = null; }
+  var old = ws;
+  ws = null;                     // marca el cierre como intencional
+  if (old) { try { old.close(); } catch (_) {} }
   teardownAudio();
 }
 
+function switchSource(newDjUrl) {
+  djUrl = newDjUrl;
+  saveDj(djUrl);
+  renderSource();
+  retryCount = 0;
+  disconnect();
+  connect();
+}
+
 document.getElementById('btn-listen').addEventListener('click', function() {
-  // Browsers may block audible autoplay. The WebSocket and playlist are already
-  // connected; this gesture only unlocks/resumes audio playback.
+  // Gesto del usuario: desbloquea/reanuda la reproduccion. La conexion ya esta activa.
   if (!audioEnabled) {
-    audioEnabled = true;
-    this.textContent = '\u23F8 SILENCIAR';
-    this.classList.add('active');
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    if (audioEl) audioEl.play().catch(function() {
-      setStatus('PULSÁ PARA HABILITAR AUDIO', 'connected');
-    });
+    userMuted = false;
+    setListening(true);
+    showTapHint(false);
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
+    if (audioEl) audioEl.play().catch(function() {});
   } else {
-    audioEnabled = false;
-    this.textContent = '\u25B6 ACTIVAR AUDIO';
-    this.classList.remove('active');
-    if (audioEl) audioEl.pause();
+    userMuted = true;
+    setListening(false);   // radio en vivo: silenciar, no pausar (evita desfase)
   }
 });
 
-document.getElementById('btn-set').addEventListener('click', function() {
-  var entered = document.getElementById('server-input').value.trim();
-  serverUrl = toWS(entered) || sameOriginWS('/listen');
-  document.getElementById('server-input').value = serverUrl;
-  disconnect();
-  initAudio();
-  connect();
-  if (audioEnabled && audioCtx) audioCtx.resume();
+document.getElementById('btn-dj-set').addEventListener('click', function() {
+  var raw = document.getElementById('dj-input').value.trim();
+  if (!raw) { if (djUrl) switchSource(''); return; }   // campo vacio = volver a la radio propia
+  var norm = normalizeDj(raw);
+  if (!norm) { setStatus('URL DE DJ INVALIDA', ''); return; }
+  if (location.protocol === 'https:' && norm.indexOf('ws://') === 0) {
+    setStatus('USA wss:// (esta pagina es HTTPS)', ''); return;
+  }
+  switchSource(norm);
 });
 
-// Connect to the playlist as soon as Bubble opens. Audio playback itself may
-// still need the user's first tap/click due to browser autoplay restrictions.
-initAudio();
+document.getElementById('btn-dj-clear').addEventListener('click', function() { switchSource(''); });
+
+// Entrada automatica: el oyente se conecta al Listener Loop sin configurar nada.
+renderSource();
 connect();
 
 document.getElementById('vol').addEventListener('input', function() {
