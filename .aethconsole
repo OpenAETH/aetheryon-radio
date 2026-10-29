@@ -1,0 +1,933 @@
+# AETHERYON DevDeck — blueprint del proyecto (schema aethconsole/1)
+# Archivo único y autoconsistente. Los campos derivados se regeneran al inspeccionar;
+# para proteger un valor manual añade el nombre del campo a `manual_fields` del objeto
+# o marca el objeto con `managed: manual`. No incluyas secretos.
+meta:
+  schema: aethconsole/1
+  schema_version: 1
+  blueprint_id: 568b7a698b5b46c999f07e50e14026dd
+  generator:
+    name: aetheryon-devdeck
+    version: 0.1.0
+  created_at: '2026-10-20T11:37:57Z'
+  updated_at: '2026-10-20T11:37:57Z'
+  inspected_at: '2026-10-20T11:37:57Z'
+  fingerprint: 92c3fd5cfc02ed9c
+project:
+  name: aetheryon-radio
+  description: null
+  root: .
+  kind: multi_component
+  vcs: git
+  languages:
+  - id: lang.html
+    name: HTML
+    files: 2
+    share: 0.5
+    status: inferred
+    confidence: high
+    evidence:
+    - source: filesystem
+      detail: 2 archivo(s)
+  - id: lang.python
+    name: Python
+    files: 2
+    share: 0.5
+    status: inferred
+    confidence: high
+    evidence:
+    - source: filesystem
+      detail: 2 archivo(s)
+  status: inferred
+  confidence: high
+  evidence:
+  - source: filesystem
+    detail: 18 archivo(s)
+topology:
+  components:
+  - id: cmp.root
+    name: aetheryon-radio
+    path: .
+    kind: unknown
+    languages:
+    - lang.html
+    - lang.python
+    frameworks: []
+    package_managers: []
+    manifests: []
+    entry_points: []
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: .
+      detail: archivos del directorio
+  - id: cmp.backend
+    name: backend
+    path: backend
+    kind: service
+    languages:
+    - lang.python
+    frameworks:
+    - name: FastAPI
+      version: ==0.111.0
+      status: declared
+      confidence: high
+      evidence:
+      - source: requirements.txt
+        detail: dependencia fastapi
+    - name: Uvicorn
+      version: ==0.29.0
+      status: declared
+      confidence: high
+      evidence:
+      - source: requirements.txt
+        detail: dependencia uvicorn
+    package_managers:
+    - name: pip
+      status: declared
+      confidence: high
+      evidence:
+      - source: backend/requirements.txt
+    manifests:
+    - backend/requirements.txt
+    entry_points:
+    - ent.backend.backend-main-py
+    status: declared
+    confidence: high
+    evidence:
+    - source: backend/requirements.txt
+  relations:
+  - from: svc.radio-server
+    to: cmp.root
+    kind: builds
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+      detail: radio-server.build
+discovery:
+  stats:
+    files: 18
+    dirs: 4
+    bytes: 41980809
+    truncated: false
+    by_class:
+      asset: 1
+      config: 2
+      docker: 2
+      docs: 5
+      other: 4
+      source: 3
+      test: 1
+    by_language:
+      HTML: 2
+      Python: 2
+  exclusions:
+  - .git
+  - .hg
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+  - .mypy_cache
+  - .pytest_cache
+  - .ruff_cache
+  - .tox
+  - .eggs
+  - '*.egg-info'
+  - dist
+  - build
+  - .idea
+  - .vscode
+  - .next
+  - .cache
+  - coverage
+  - site-packages
+  - .DS_Store
+  - .aethconsole
+  notable_files:
+  - path: .gitignore
+    class: config
+    language: null
+    component: cmp.root
+  - path: AETHERYON_RADIO_Deployment_Operations_Guide.md
+    class: docs
+    language: null
+    component: cmp.root
+  - path: backend/Dockerfile
+    class: docker
+    language: null
+    component: cmp.backend
+  - path: backend/main.py
+    class: source
+    language: Python
+    component: cmp.backend
+  - path: backend/requirements.txt
+    class: config
+    language: null
+    component: cmp.backend
+  - path: docker-compose.yml
+    class: docker
+    language: null
+    component: cmp.root
+  - path: music/playlist.txt
+    class: docs
+    language: null
+    component: cmp.root
+  - path: music/README.md
+    class: docs
+    language: null
+    component: cmp.root
+  - path: README.md
+    class: docs
+    language: null
+    component: cmp.root
+  - path: repo_report--aetheryon-radio.txt
+    class: docs
+    language: null
+    component: cmp.root
+  - path: tests/test_webm_framer.py
+    class: test
+    language: Python
+    component: cmp.root
+  entry_points:
+  - id: ent.backend.backend-main-py
+    component: cmp.backend
+    name: main.py
+    path: backend/main.py
+    kind: script
+    origin: code
+    primary: true
+    command:
+      tool: tool.python
+      program: python
+      args:
+      - main.py
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 452
+      detail: guardia if __name__ == "__main__"
+    - source: backend/main.py
+      detail: nombre convencional de arranque
+  scripts: []
+  dependencies:
+  - component: cmp.backend
+    ecosystem: pypi
+    name: fastapi
+    spec: ==0.111.0
+    scope: runtime
+    source: requirements.txt
+  - component: cmp.backend
+    ecosystem: pypi
+    name: uvicorn
+    spec: ==0.29.0
+    scope: runtime
+    source: requirements.txt
+  - component: cmp.backend
+    ecosystem: pypi
+    name: websockets
+    spec: ==12.0
+    scope: runtime
+    source: requirements.txt
+  documentation:
+  - source: README.md
+    line: 10
+    heading: Arquitectura
+    text: DJ (dj.html)
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 11
+    heading: Arquitectura
+    text: └─ WebSocket ──► FastAPI :8000/broadcast
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 12
+    heading: Arquitectura
+    text: └─ Fan-out ──► Listeners (listener.html)
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 13
+    heading: Arquitectura
+    text: └─ WS :8000/listen
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 22
+    heading: 1. Levantar el servidor
+    text: docker compose up --build -d
+    kind: docker
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 25
+    heading: 1. Levantar el servidor
+    text: docker compose logs -f
+    kind: docker
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 36
+    heading: Opción A — ngrok (más fácil)
+    text: ngrok http 8000
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 42
+    heading: Opción B — Cloudflare Tunnel (gratis, sin cuenta pagada)
+    text: cloudflared tunnel --url http://localhost:8000
+    kind: other
+    entry_point: null
+    exists: null
+  - source: README.md
+    line: 75
+    heading: 4. Compartir con oyentes
+    text: listener.html?server=wss://abc123.ngrok.io/listen
+    kind: other
+    entry_point: null
+    exists: null
+environments:
+  tools:
+  - id: tool.docker
+    name: Docker
+    kind: container
+    path: C:\Program Files\Docker\Docker\resources\bin\docker.EXE
+    version: 29.4.2,
+    available: true
+    checked_at: '2026-10-20T11:37:57Z'
+    status: available
+    confidence: high
+    evidence:
+    - source: PATH
+      detail: C:\Program Files\Docker\Docker\resources\bin\docker.EXE
+  - id: tool.python
+    name: Python
+    kind: runtime
+    path: D:\Prototypes\AETHERYON-DevDeck\.venv\Scripts\python.EXE
+    version: 3.13.12
+    available: true
+    checked_at: '2026-10-20T11:37:57Z'
+    status: available
+    confidence: high
+    evidence:
+    - source: PATH
+      detail: D:\Prototypes\AETHERYON-DevDeck\.venv\Scripts\python.EXE
+  components:
+  - id: env.root.python
+    component: cmp.root
+    kind: python
+    requirement: null
+    virtualenv: null
+    interpreter: null
+    lockfiles: []
+    status: inferred
+    confidence: low
+    evidence:
+    - source: .
+      detail: archivos del directorio
+  - id: env.backend.python
+    component: cmp.backend
+    kind: python
+    requirement: null
+    virtualenv: null
+    interpreter: null
+    lockfiles: []
+    status: inferred
+    confidence: low
+    evidence:
+    - source: backend/requirements.txt
+interfaces:
+  cli: []
+  endpoints:
+  - id: if.http.backend.get-root-main
+    component: cmp.backend
+    framework: fastapi
+    method: GET
+    path: /
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 346
+      detail: GET /
+  - id: if.http.backend.get-dj-main
+    component: cmp.backend
+    framework: fastapi
+    method: GET
+    path: /dj
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 352
+      detail: GET /dj
+  - id: if.http.backend.get-status-main
+    component: cmp.backend
+    framework: fastapi
+    method: GET
+    path: /status
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 358
+      detail: GET /status
+  - id: if.http.backend.options-status-main
+    component: cmp.backend
+    framework: fastapi
+    method: OPTIONS
+    path: /status
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 366
+      detail: OPTIONS /status
+  - id: if.http.backend.get-healthz-main
+    component: cmp.backend
+    framework: fastapi
+    method: GET
+    path: /healthz
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 371
+      detail: GET /healthz
+  - id: if.http.backend.websocket-broadcast-main
+    component: cmp.backend
+    framework: fastapi
+    method: WEBSOCKET
+    path: /broadcast
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 376
+      detail: WEBSOCKET /broadcast
+  - id: if.http.backend.websocket-listen-main
+    component: cmp.backend
+    framework: fastapi
+    method: WEBSOCKET
+    path: /listen
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 418
+      detail: WEBSOCKET /listen
+  ports:
+  - id: if.port.backend.8001
+    component: cmp.backend
+    port: 8001
+    protocol: tcp
+    origin: code
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 453
+      detail: uvicorn.run(port=…)
+  - id: if.port.backend.8000-dockerfile
+    component: cmp.backend
+    port: 8000
+    protocol: tcp
+    origin: dockerfile
+    status: declared
+    confidence: high
+    evidence:
+    - source: backend/Dockerfile
+      detail: EXPOSE 8000
+  - id: if.port.radio-server.8000-compose
+    component: svc.radio-server
+    port: 8000
+    protocol: tcp
+    origin: compose
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+      detail: 'radio-server: 8001:8000'
+  ui: []
+operations:
+  catalog:
+  - id: op.root.test
+    label: python -m pytest
+    component: cmp.root
+    category: test
+    command:
+      tool: tool.python
+      program: python
+      args:
+      - -m
+      - pytest
+    cwd: .
+    preconditions:
+    - kind: tool_available
+      ref: tool.python
+    effects:
+    - reads_fs
+    permissions:
+    - execute
+    success:
+      kind: exit_code
+      expected: 0
+    source: []
+    status: inferred
+    confidence: low
+    evidence:
+    - source: .
+      detail: pytest declarado o tests presentes
+  - id: op.backend.run-backend-main-py
+    label: python main.py
+    component: cmp.backend
+    category: run
+    command:
+      tool: tool.python
+      program: python
+      args:
+      - main.py
+    cwd: backend
+    preconditions:
+    - kind: tool_available
+      ref: tool.python
+    - kind: file_exists
+      path: backend/main.py
+    effects:
+    - starts_process
+    permissions:
+    - execute
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - ent.backend.backend-main-py
+    status: inferred
+    confidence: medium
+    evidence:
+    - source: backend/main.py
+      line: 452
+      detail: guardia if __name__ == "__main__"
+    - source: backend/main.py
+      detail: nombre convencional de arranque
+  - id: op.backend.install
+    label: pip install -r requirements.txt
+    component: cmp.backend
+    category: install
+    command:
+      tool: tool.python
+      program: python
+      args:
+      - -m
+      - pip
+      - install
+      - -r
+      - requirements.txt
+    cwd: backend
+    preconditions:
+    - kind: tool_available
+      ref: tool.python
+    - kind: file_exists
+      path: backend/requirements.txt
+    - kind: authorization
+      detail: installs,network,alters_environment
+    effects:
+    - installs
+    - network
+    - alters_environment
+    permissions:
+    - execute
+    - install
+    - network
+    success:
+      kind: exit_code
+      expected: 0
+    source: []
+    status: declared
+    confidence: high
+    evidence:
+    - source: backend/requirements.txt
+  - id: op.backend.docker-build-backend-dockerfile
+    label: docker build -t backend:local
+    component: cmp.backend
+    category: docker
+    command:
+      tool: tool.docker
+      program: docker
+      args:
+      - build
+      - -t
+      - backend:local
+      - .
+    cwd: backend
+    preconditions:
+    - kind: tool_available
+      ref: tool.docker
+    - kind: file_exists
+      path: backend/Dockerfile
+    - kind: environment
+      detail: docker_daemon
+    - kind: authorization
+      detail: alters_environment,network,writes_fs
+    effects:
+    - alters_environment
+    - network
+    - writes_fs
+    permissions:
+    - execute
+    - network
+    - write
+    - docker
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - dkf.backend-dockerfile
+    status: declared
+    confidence: high
+    evidence:
+    - source: backend/Dockerfile
+  - id: op.root.compose-up-docker-compose-yml
+    label: docker compose up
+    component: cmp.root
+    category: docker
+    command:
+      tool: tool.docker
+      program: docker
+      args:
+      - compose
+      - -f
+      - docker-compose.yml
+      - up
+      - -d
+    cwd: .
+    preconditions:
+    - kind: tool_available
+      ref: tool.docker
+    - kind: file_exists
+      path: docker-compose.yml
+    - kind: environment
+      detail: docker_compose
+    - kind: environment
+      detail: docker_daemon
+    - kind: authorization
+      detail: alters_environment,network
+    effects:
+    - alters_environment
+    - starts_process
+    - network
+    permissions:
+    - execute
+    - network
+    - docker
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - dkc.docker-compose-yml
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+  - id: op.root.compose-down-docker-compose-yml
+    label: docker compose down
+    component: cmp.root
+    category: docker
+    command:
+      tool: tool.docker
+      program: docker
+      args:
+      - compose
+      - -f
+      - docker-compose.yml
+      - down
+    cwd: .
+    preconditions:
+    - kind: tool_available
+      ref: tool.docker
+    - kind: file_exists
+      path: docker-compose.yml
+    - kind: environment
+      detail: docker_compose
+    - kind: environment
+      detail: docker_daemon
+    - kind: authorization
+      detail: stops_services,alters_environment
+    effects:
+    - stops_services
+    - alters_environment
+    permissions:
+    - execute
+    - docker
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - dkc.docker-compose-yml
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+  - id: op.root.compose-ps-docker-compose-yml
+    label: docker compose ps
+    component: cmp.root
+    category: inspect
+    command:
+      tool: tool.docker
+      program: docker
+      args:
+      - compose
+      - -f
+      - docker-compose.yml
+      - ps
+    cwd: .
+    preconditions:
+    - kind: tool_available
+      ref: tool.docker
+    - kind: file_exists
+      path: docker-compose.yml
+    - kind: environment
+      detail: docker_compose
+    - kind: environment
+      detail: docker_daemon
+    effects:
+    - none
+    permissions:
+    - execute
+    - docker
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - dkc.docker-compose-yml
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+  - id: op.root.compose-logs-docker-compose-yml
+    label: docker compose logs
+    component: cmp.root
+    category: inspect
+    command:
+      tool: tool.docker
+      program: docker
+      args:
+      - compose
+      - -f
+      - docker-compose.yml
+      - logs
+      - --tail
+      - '100'
+    cwd: .
+    preconditions:
+    - kind: tool_available
+      ref: tool.docker
+    - kind: file_exists
+      path: docker-compose.yml
+    - kind: environment
+      detail: docker_compose
+    - kind: environment
+      detail: docker_daemon
+    effects:
+    - none
+    permissions:
+    - execute
+    - docker
+    success:
+      kind: exit_code
+      expected: 0
+    source:
+    - dkc.docker-compose-yml
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+docker:
+  dockerfiles:
+  - id: dkf.backend-dockerfile
+    path: backend/Dockerfile
+    component: cmp.backend
+    base_images:
+    - python:3.12-slim
+    exposed_ports:
+    - 8000
+    cmd:
+    - uvicorn
+    - main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8000'
+    entrypoint: null
+    status: declared
+    confidence: high
+    evidence:
+    - source: backend/Dockerfile
+  compose_files:
+  - id: dkc.docker-compose-yml
+    path: docker-compose.yml
+    services:
+    - svc.radio-server
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+  services:
+  - id: svc.radio-server
+    name: radio-server
+    compose: dkc.docker-compose-yml
+    image: null
+    build_context: .
+    dockerfile: backend/Dockerfile
+    component: cmp.root
+    ports:
+    - host: 8001
+      container: 8000
+      protocol: tcp
+    depends_on: []
+    env_names:
+    - AUTODJ_ENABLED
+    - AUTODJ_PLAYLIST
+    - AUTODJ_RESTART_DELAY
+    - MUSIC_DIR
+    - PYTHONUNBUFFERED
+    status: declared
+    confidence: high
+    evidence:
+    - source: docker-compose.yml
+      detail: services.radio-server
+runtime:
+  observed_at: '2026-10-20T11:37:57Z'
+  processes: []
+  docker:
+    cli_available: true
+    cli_path: C:\Program Files\Docker\Docker\resources\bin\docker.EXE
+    compose_plugin: true
+    daemon: ok
+    version: 29.4.2
+    error: null
+    images:
+    - repository: worldtime-aetheryon-worldtime
+      tag: latest
+      id: a35a28554fd5
+      size: 626MB
+    - repository: aetheryon-outreach-sender
+      tag: local
+      id: 43a58fd2e7d1
+      size: 275MB
+    - repository: aetheryon-radio-radio-server
+      tag: latest
+      id: e0bd083f77f0
+      size: 906MB
+    - repository: aetheryon/nda-clients
+      tag: latest
+      id: e0a2d34d6daf
+      size: 363MB
+    - repository: asistente-ejecutivo
+      tag: local
+      id: 44d97915d3a0
+      size: 268MB
+    - repository: postgres
+      tag: 16-alpine
+      id: e013e867e712
+      size: 420MB
+    - repository: gosom/google-maps-scraper
+      tag: latest
+      id: c6208c8fee79
+      size: 1.99GB
+    - repository: hello-world
+      tag: latest
+      id: f9078146db2e
+      size: 25.9kB
+    - repository: kindest/node
+      tag: v1.34.3
+      id: 08497ee19eac
+      size: 1.35GB
+    - repository: docker/desktop-cloud-provider-kind
+      tag: v0.5.0
+      id: 4ad59ce20658
+      size: 595MB
+    - repository: envoyproxy/envoy
+      tag: v1.36.4
+      id: 08acc53db6f4
+      size: 248MB
+    - repository: docker/desktop-containerd-registry-mirror
+      tag: v0.0.3
+      id: 179a9ea3ae47
+      size: 50.3MB
+    containers:
+    - id: cd0dd1af0d72
+      name: AETHERYON-WorldTime
+      image: worldtime-aetheryon-worldtime
+      status: Up 6 hours (healthy)
+      state: running
+    - id: 5e9ce5085618
+      name: interesting_chandrasekhar
+      image: aetheryon-outreach-sender:local
+      status: Up 6 hours
+      state: running
+    - id: 545744e962de
+      name: aetheryon-outreach-sender
+      image: aetheryon-outreach-sender:local
+      status: Up 7 hours (healthy)
+      state: running
+    - id: 9c015085fb9d
+      name: aetheryon-radio
+      image: aetheryon-radio-radio-server
+      status: Up 8 hours (healthy)
+      state: running
+    - id: 09a194337353
+      name: nda-clients
+      image: aetheryon/nda-clients:latest
+      status: Up 8 hours (healthy)
+      state: running
+    - id: e7043d9c7fae
+      name: flamboyant_ptolemy
+      image: 12100913455b
+      status: Exited (1) 3 months ago
+      state: exited
+    - id: c65bdb50a502
+      name: frosty_wing
+      image: 12100913455b
+      status: Exited (1) 3 months ago
+      state: exited
+    - id: c308465fee70
+      name: amazing_bhabha
+      image: 12100913455b
+      status: Exited (1) 3 months ago
+      state: exited
+    - id: 406ca35a32ae
+      name: hardcore_noether
+      image: hello-world
+      status: Exited (0) 5 months ago
+      state: exited
+  verifications: []
+  history: []
+diagnostics:
+  findings:
+  - id: dg.no_virtualenv.1
+    severity: info
+    origin: tooling
+    code: no_virtualenv
+    message: 'cmp.root: no hay entorno virtual (.venv/venv); se usará el Python del PATH.'
+    refs:
+    - cmp.root
+    at: '2026-10-20T11:37:57Z'
+  - id: dg.no_virtualenv.2
+    severity: info
+    origin: tooling
+    code: no_virtualenv
+    message: 'cmp.backend: no hay entorno virtual (.venv/venv); se usará el Python del PATH.'
+    refs:
+    - cmp.backend
+    at: '2026-10-20T11:37:57Z'
