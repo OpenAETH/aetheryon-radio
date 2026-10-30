@@ -17,3 +17,10 @@ services:
         value: /music/playlist.txt
       - key: MUSIC_DIR
         value: /music
+      - key: PLAYOUT_ENGINE
+        value: continuous
+      # Token compartido con TerraGazette (RADIO_API_TOKEN). Se define en el panel de Render, nunca en el repo.
+      - key: RADIO_API_TOKEN
+        sync: false
+      - key: NEWS_AFTER_PLAY
+        value: delete

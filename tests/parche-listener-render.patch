@@ -1,0 +1,556 @@
+diff --git a/README.md b/README.md
+index 75836fc..e7baa98 100644
+--- a/README.md
++++ b/README.md
+@@ -1,96 +1,45 @@
+ # AETHERYON RADIO
+ 
+-Sistema de radio online con panel DJ de browser, servidor FastAPI WebSocket en Docker, y página de oyentes.
+-
+----
++Radio online autonoma. El backend (FastAPI) emite una playlist en bucle (**Listener Loop**) y la distribuye por WebSocket; el cliente de escucha (`index.html`) se conecta solo a esa emision. Opcionalmente, un oyente puede sintonizar la URL publica de un DJ.
+ 
+ ## Arquitectura
+ 
+ ```
+-DJ (dj.html)
+-  └─ WebSocket ──► FastAPI :8000/broadcast
+-                       └─ Fan-out ──► Listeners (listener.html)
+-                                         └─ WS :8000/listen
++backend (FastAPI, desplegado)
++  ├─ AutoDJ: ffmpeg lee music/playlist.txt en bucle -> WebM/Opus
++  ├─ GET /          cliente de escucha (index.html), mismo origen que el stream
++  ├─ WS  /listen    oyentes (fan-out en memoria)
++  ├─ WS  /broadcast DJ en vivo (reemplaza al AutoDJ mientras esta conectado)
++  ├─ GET /dj        panel DJ
++  └─ GET /status, /healthz
+ ```
+ 
+----
+-
+-## 1. Levantar el servidor
++## Comportamiento del cliente
+ 
+-```bash
+-# Desde la raíz del proyecto
+-docker compose up --build -d
++1. Al abrir la URL publica se conecta a `wss://<mismo-host>/listen` (Listener Loop). No hay nada que configurar.
++2. Si el navegador bloquea el autoplay, se muestra el boton **ESCUCHAR** resaltado; un toque inicia el audio.
++3. **Opcional:** pegar la URL publica de un DJ (`wss://host/listen`, o solo `https://host`) y pulsar **SINTONIZAR**. Ese cliente reproduce al DJ en lugar de la radio propia (se recuerda en el navegador).
++4. **VOLVER A RADIO** (o vaciar el campo y pulsar SINTONIZAR) restaura el Listener Loop.
++5. Si la conexion se corta, el cliente reconecta con backoff.
+ 
+-# Ver logs
+-docker compose logs -f
+-```
++## Playlist
+ 
+-El server queda en `http://localhost:8000`
++Copiar los audios a `music/` y listar un archivo por linea en `music/playlist.txt`. La carpeta se incluye en la imagen Docker, por lo que el despliegue no depende de volumenes locales.
+ 
+----
++## Despliegue (Render)
+ 
+-## 2. Exponer a Internet (túnel)
++`render.yaml` define un servicio Docker siempre encendido (`plan: starter`; el plan free se suspende y cortaria la emision) con health check en `/healthz`. Conectar el repo en Render como Blueprint y usar la URL publica resultante.
+ 
+-### Opción A — ngrok (más fácil)
+-```bash
+-ngrok http 8000
+-# Te da: https://abc123.ngrok.io
+-```
++## Verificacion end-to-end (entorno desplegado)
+ 
+-### Opción B — Cloudflare Tunnel (gratis, sin cuenta pagada)
+ ```bash
+-cloudflared tunnel --url http://localhost:8000
++curl -fsS https://<tu-servicio>/status      # autodj_enabled: true, stream_ready: true, source: "autodj"
+ ```
+ 
+-### Opción C — Tu propio dominio + nginx reverse proxy
+-```nginx
+-location /radio/ {
+-    proxy_pass http://localhost:8000/;
+-    proxy_http_version 1.1;
+-    proxy_set_header Upgrade $http_upgrade;
+-    proxy_set_header Connection "upgrade";
+-}
+-```
+-
+----
+-
+-## 3. Usar el Panel DJ
+-
+-Abre `frontend/dj.html` en Chrome/Edge (Firefox tiene limitaciones con MediaRecorder+WebM).
+-
+-1. **Carga audios**: arrastra MP3/WAV/OGG al panel izquierdo
+-2. **Conecta el servidor**: ingresa la URL WebSocket en el panel derecho
+-   - Local: `ws://localhost:8000/broadcast`
+-   - Con ngrok: `wss://abc123.ngrok.io/broadcast`
+-3. **Reproduce música**: usa los controles de transporte
+-4. **Go Live**: presiona el botón rojo para activar el micrófono y transmitir en vivo
++Abrir `https://<tu-servicio>/` en un navegador limpio: debe pasar a **EN VIVO** sin configurar nada y seguir sonando tras terminar la ultima pista.
+ 
+----
++## Desarrollo local (solo para probar)
+ 
+-## 4. Compartir con oyentes
+-
+-Abre `frontend/listener.html` en cualquier browser, o comparte la URL con el parámetro:
+-
+-```
+-listener.html?server=wss://abc123.ngrok.io/listen
++```bash
++docker compose up --build -d   # http://localhost:8001
+ ```
+-
+----
+-
+-## 5. API del servidor
+-
+-| Endpoint | Método | Descripción |
+-|----------|--------|-------------|
+-| `/` | GET | Info general |
+-| `/status` | GET | Oyentes actuales, peak, chunks |
+-| `/broadcast` | WebSocket | DJ envía audio aquí |
+-| `/listen` | WebSocket | Oyentes reciben aquí |
+-
+----
+-
+-## Notas técnicas
+-
+-- El audio se transmite en chunks de **100ms** (WebM/Opus ~64kbps)
+-- El servidor hace fan-out en memoria — sin disco, sin latencia de archivo
+-- Latencia estimada: **300-800ms** dependiendo del túnel
+-- Para producción con +100 oyentes: considera un servidor con más RAM y Icecast como relay secundario
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 34dc2ff..eb41b70 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -10,6 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt
+ COPY backend/main.py ./main.py
+ COPY index.html ./index.html
+ COPY frontend/dj.html ./frontend/dj.html
++# La playlist viaja dentro de la imagen: el backend desplegado no depende de volumenes locales.
++COPY music /music
++ENV AUTODJ_ENABLED=true \
++    AUTODJ_PLAYLIST=/music/playlist.txt \
++    MUSIC_DIR=/music
+ 
+ EXPOSE 8000
+ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+diff --git a/backend/main.py b/backend/main.py
+index 097575e..bfc1c01 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -26,6 +26,8 @@ MAX_LISTENERS = int(os.getenv("MAX_LISTENERS", "200"))
+ AUTODJ_ENABLED = os.getenv("AUTODJ_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+ AUTODJ_PLAYLIST = Path(os.getenv("AUTODJ_PLAYLIST", "/music/playlist.txt"))
+ AUTODJ_RESTART_DELAY = float(os.getenv("AUTODJ_RESTART_DELAY", "3"))
++# ffmpeg no soporta -stream_loop con el demuxer concat, asi que el bucle se arma repitiendo la playlist.
++AUTODJ_LOOP_REPEAT = max(1, int(os.getenv("AUTODJ_LOOP_REPEAT", "1000")))
+ MUSIC_DIR = Path(os.getenv("MUSIC_DIR", "/music")).resolve()
+ STREAM_MIME = 'audio/webm;codecs="opus"'
+ 
+@@ -217,12 +219,20 @@ async def _publish_stream_data(session: str, framer: WebMFramer, data: bytes) ->
+         await _fanout_binary(media, session=session)
+ 
+ 
++SUPPORTED_AUDIO = {".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac", ".webm"}
++
++
++def _scan_music_dir() -> list[Path]:
++    """Zero-configuration fallback: every supported audio file, in name order."""
++    if not MUSIC_DIR.is_dir():
++        return []
++    return sorted((p.resolve() for p in MUSIC_DIR.iterdir()
++                   if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO), key=lambda p: p.name.lower())
++
++
+ def _load_playlist() -> list[Path]:
+-    supported = {".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac", ".webm"}
+     if not AUTODJ_PLAYLIST.is_file():
+-        # Zero-configuration fallback: play every supported audio file in order.
+-        return sorted((p.resolve() for p in MUSIC_DIR.iterdir()
+-                       if p.is_file() and p.suffix.lower() in supported), key=lambda p: p.name.lower())
++        return _scan_music_dir()
+     tracks = []
+     for raw in AUTODJ_PLAYLIST.read_text(encoding="utf-8").splitlines():
+         name = raw.strip()
+@@ -233,11 +243,8 @@ def _load_playlist() -> list[Path]:
+             logger.warning("AutoDJ playlist entry ignored (missing or outside music dir): %s", name)
+             continue
+         tracks.append(candidate)
+-    if not tracks:
+-        # An empty/missing playlist should not prevent a simple music/ folder from working.
+-        tracks = sorted((p.resolve() for p in MUSIC_DIR.iterdir()
+-                         if p.is_file() and p.suffix.lower() in supported), key=lambda p: p.name.lower())
+-    return tracks
++    # An empty/invalid playlist must not prevent a plain music/ folder from working.
++    return tracks or _scan_music_dir()
+ 
+ 
+ def _ffconcat_escape(path: Path) -> str:
+@@ -252,17 +259,20 @@ async def _autodj_supervisor() -> None:
+             continue
+         tracks = _load_playlist()
+         if not tracks:
++            logger.error("AutoDJ: no playable tracks found in %s (playlist=%s)", MUSIC_DIR, AUTODJ_PLAYLIST)
+             await asyncio.sleep(max(AUTODJ_RESTART_DELAY, 5))
+             continue
+         playlist_file = Path("/tmp/aetheryon-radio-playlist.ffconcat")
+-        content = "ffconcat version 1.0\n" + "".join(f"file '{_ffconcat_escape(p)}'\n" for p in tracks)
++        entries = "".join(f"file '{_ffconcat_escape(p)}'\n" for p in tracks)
++        content = "ffconcat version 1.0\n" + entries * AUTODJ_LOOP_REPEAT
+         playlist_file.write_text(content, encoding="utf-8")
+         session = await _begin_stream("autodj")
+         framer = WebMFramer()
+-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-re",
++        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+                "-f", "concat", "-safe", "0", "-i", str(playlist_file), "-vn",
+                "-c:a", "libopus", "-b:a", "96k", "-application", "audio",
+                "-cluster_time_limit", "1000", "-live", "1", "-f", "webm", "pipe:1"]
++        failed = True  # solo un fin limpio de ffmpeg (EOF + exit 0) reinicia sin espera
+         try:
+             logger.info("AutoDJ starting with %d track(s)", len(tracks))
+             autodj_process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
+@@ -270,9 +280,12 @@ async def _autodj_supervisor() -> None:
+             while not dj_connected and session == stream_session:
+                 chunk = await autodj_process.stdout.read(8192)
+                 if not chunk:
++                    await autodj_process.wait()
++                    failed = autodj_process.returncode != 0
+                     break
+                 await _publish_stream_data(session, framer, chunk)
+             if autodj_process.returncode is None:
++                failed = False  # corte intencional (DJ en vivo o cambio de sesion)
+                 autodj_process.terminate()
+                 try:
+                     await asyncio.wait_for(autodj_process.wait(), timeout=3)
+@@ -293,7 +306,7 @@ async def _autodj_supervisor() -> None:
+             autodj_process = None
+         if not dj_connected:
+             stats["autodj_restarts"] += 1
+-            await asyncio.sleep(AUTODJ_RESTART_DELAY)
++            await asyncio.sleep(AUTODJ_RESTART_DELAY if failed else 0)
+ 
+ 
+ async def _kick_dead_listeners() -> None:
+@@ -373,6 +386,7 @@ async def healthz():
+     return JSONResponse({"ok": True, "source": active_source, "stream_ready": stream_init is not None})
+ 
+ 
++
+ @app.websocket("/broadcast")
+ async def broadcast_endpoint(ws: WebSocket):
+     global dj_ws, dj_connected
+diff --git a/index.html b/index.html
+index ed060a1..273e70c 100644
+--- a/index.html
++++ b/index.html
+@@ -140,6 +140,12 @@ canvas {
+   touch-action: manipulation;
+ }
+ .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
++.source-label { font-size:9px; letter-spacing:2px; color:var(--muted); margin-top:18px; text-transform:uppercase; }
++.source-label b { color:var(--cyan); font-weight:700; }
++.btn-listen.attention { animation:attn 1.2s ease-in-out infinite; }
++@keyframes attn { 0%,100%{ box-shadow:0 0 0 0 rgba(0,245,212,.5) } 50%{ box-shadow:0 0 0 10px transparent } }
++.tap-hint { font-size:10px; letter-spacing:1px; color:var(--amber); margin:-8px 0 16px; }
++.hidden { display:none !important; }
+ </style>
+ </head>
+ <body>
+@@ -152,15 +158,18 @@ canvas {
+     <div class="dot" id="dot"></div>
+     <span id="status-text">DISCONNECTED</span>
+   </div>
+-  <button class="btn-listen" id="btn-listen">&#9654; ACTIVAR AUDIO</button>
++  <button class="btn-listen" id="btn-listen">&#9654; ESCUCHAR</button>
+   <div class="vol-row">
+     <span class="vol-label">VOL</span>
+     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
+     <span class="vol-label" id="vol-pct">80%</span>
+   </div>
++  <div class="tap-hint hidden" id="tap-hint">El navegador bloqueó el audio automático: tocá para escuchar</div>
++  <div class="source-label" id="source-label">FUENTE: <b>AETHERYON RADIO</b> (LISTENER LOOP)</div>
+   <div class="server-row">
+-    <input type="text" id="server-input" placeholder="wss://host/listen">
+-    <button class="btn-mini" id="btn-set">SET</button>
++    <input type="text" id="dj-input" placeholder="URL de DJ (opcional): wss://host/listen">
++    <button class="btn-mini" id="btn-dj-set">SINTONIZAR</button>
++    <button class="btn-mini hidden" id="btn-dj-clear">VOLVER A RADIO</button>
+   </div>
+ </div>
+ 
+@@ -191,20 +200,52 @@ function toWS(raw) {
+   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + s;
+ }
+ 
+-var rawParam = new URLSearchParams(location.search).get('server') || '';
+ function sameOriginWS(path) {
+   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + path;
+ }
+-// Radio Default: the listener UI is served by the radio server itself, so no
+-// DJ/tunnel URL needs to be entered. ?server=... remains an optional override.
+-var serverUrl = toWS(rawParam) || sameOriginWS('/listen');
+-document.getElementById('server-input').value = serverUrl;
++
++// Fuente por defecto: Listener Loop, emitido por el backend que sirve esta pagina.
++// Unica configuracion opcional: URL publica de un DJ (se recuerda en este navegador).
++var DJ_KEY = 'aetheryon_dj_url';
++function normalizeDj(raw) {
++  var ws = toWS(raw);
++  if (!ws) return '';
++  try {
++    var u = new URL(ws);
++    if (u.pathname === '' || u.pathname === '/') u.pathname = '/listen';
++    return u.toString();
++  } catch (_) { return ''; }
++}
++function loadDj() {
++  var fromParam = new URLSearchParams(location.search).get('server');
++  if (fromParam) return normalizeDj(fromParam);
++  try { return normalizeDj(localStorage.getItem(DJ_KEY) || ''); } catch (_) { return ''; }
++}
++function saveDj(url) {
++  try { if (url) localStorage.setItem(DJ_KEY, url); else localStorage.removeItem(DJ_KEY); } catch (_) {}
++}
++var djUrl = loadDj();
++function currentSource() { return djUrl || sameOriginWS('/listen'); }
++function renderSource() {
++  var label = document.getElementById('source-label');
++  if (djUrl) {
++    var host = '';
++    try { host = new URL(djUrl).host; } catch (_) { host = djUrl; }
++    label.innerHTML = 'FUENTE: DJ <b></b>';
++    label.querySelector('b').textContent = host;
++  } else {
++    label.innerHTML = 'FUENTE: <b>AETHERYON RADIO</b> (LISTENER LOOP)';
++  }
++  document.getElementById('btn-dj-clear').classList.toggle('hidden', !djUrl);
++  document.getElementById('dj-input').value = djUrl;
++}
+ 
+ var ws          = null;
+ var audioCtx    = null;
+ var analyser    = null;
+ var gainNode    = null;
+-var audioEnabled = false;
++var audioEnabled = false;   // true = sonando (autoplay ok o tras un toque)
++var userMuted   = false;   // el oyente silencio explicitamente
+ var pingTimer   = null;
+ var audioEl     = null;
+ var mediaSource = null;
+@@ -213,6 +254,8 @@ var sbReady     = false;
+ var queue       = [];
+ var currentMime = 'audio/webm;codecs="opus"';
+ var currentSession = null;
++var retryTimer  = null;
++var retryCount  = 0;
+ 
+ // Canvas
+ var canvas = document.getElementById('viz');
+@@ -297,6 +340,7 @@ function initAudio() {
+   audioEl = document.createElement('audio');
+   audioEl.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+   audioEl.playsInline = true;  // MOBILE FIX 4: iOS no fullscreen
++  audioEl.muted = userMuted;
+   document.body.appendChild(audioEl);
+ 
+   var mediaSrc = audioCtx.createMediaElementSource(audioEl);
+@@ -347,30 +391,63 @@ function teardownAudio() {
+   }
+ }
+ 
++function setListening(on) {
++  audioEnabled = on;
++  var btn = document.getElementById('btn-listen');
++  btn.textContent = on ? '\u23F8 SILENCIAR' : '\u25B6 ESCUCHAR';
++  btn.classList.toggle('active', on);
++  if (audioEl) audioEl.muted = !on;
++}
++
++function showTapHint(show) {
++  document.getElementById('tap-hint').classList.toggle('hidden', !show);
++  document.getElementById('btn-listen').classList.toggle('attention', !!show);
++}
++
++// Intenta reproducir; si el navegador bloquea el autoplay, muestra el control para hacerlo con un toque.
++function tryPlay() {
++  if (!audioEl) return;
++  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
++  audioEl.play().catch(function() {});
++  setTimeout(function() {
++    var blocked = !audioEl || audioEl.paused || !audioCtx || audioCtx.state !== 'running';
++    showTapHint(blocked && !audioEnabled && !userMuted);
++    if (!blocked && !userMuted) setListening(true);   // autoplay permitido: ya esta sonando
++  }, 400);
++}
++
+ function connect() {
+-  var url = toWS(serverUrl) || sameOriginWS('/listen');
+-  setStatus('CONECTANDO RADIO DEFAULT...', '');
+-  ws = new WebSocket(url);
+-  ws.binaryType = 'arraybuffer';
++  clearTimeout(retryTimer);
++  var url = currentSource();
++  setStatus(djUrl ? 'CONECTANDO AL DJ...' : 'CONECTANDO A LA RADIO...', '');
++  var sock;
++  try { sock = new WebSocket(url); } catch (e) { setStatus('URL INVALIDA', ''); return; }
++  ws = sock;
++  sock.binaryType = 'arraybuffer';
+ 
+-  ws.onopen = function() {
+-    setStatus('CONECTADO - RADIO DEFAULT', 'connected');
++  sock.onopen = function() {
++    if (ws !== sock) return;
++    retryCount = 0;
++    setStatus(djUrl ? 'CONECTADO - DJ' : 'CONECTADO - AETHERYON RADIO', 'connected');
++    clearInterval(pingTimer);
+     pingTimer = setInterval(function() {
+-      if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
++      if (sock.readyState === WebSocket.OPEN) sock.send('ping');
+     }, PING_INTERVAL);
+   };
+ 
+-  ws.onmessage = function(e) {
++  sock.onmessage = function(e) {
++    if (ws !== sock) return;
+     if (typeof e.data === 'string') {
+       var control;
+       try { control = JSON.parse(e.data); } catch (_) { return; }
+       if (control.type === 'stream_start') {
+-        // New session/source: invalidate old MSE queue before accepting any bytes.
++        // Nueva sesion/fuente: invalidar la cola MSE antes de aceptar bytes.
+         currentSession = control.session_id;
+         currentMime = control.mime || 'audio/webm;codecs="opus"';
+         teardownAudio();
+         initAudio();
+         setStatus('SINCRONIZANDO STREAM...', 'connected');
++        tryPlay();
+       } else if (control.type === 'waiting') {
+         setStatus('ESPERANDO TRANSMISION', 'connected');
+       }
+@@ -382,54 +459,68 @@ function connect() {
+     appendNext();
+   };
+ 
+-  ws.onclose = function() {
+-    setStatus('DESCONECTADO', '');
++  sock.onclose = function() {
++    if (ws !== sock) return;   // cierre intencional (cambio de fuente)
+     clearInterval(pingTimer);
++    // Radio siempre disponible: reconectar con backoff (cubre reinicios/despliegues del backend).
++    var delay = Math.min(1000 * Math.pow(2, retryCount++), 15000);
++    setStatus('RECONECTANDO...', '');
++    retryTimer = setTimeout(connect, delay);
+   };
+ 
+-  ws.onerror = function() {
++  sock.onerror = function() {
++    if (ws !== sock) return;
+     setStatus('ERROR DE CONEXION', '');
+   };
+ }
+ 
+ function disconnect() {
++  clearTimeout(retryTimer);
+   clearInterval(pingTimer);
+-  if (ws) { ws.close(); ws = null; }
++  var old = ws;
++  ws = null;                     // marca el cierre como intencional
++  if (old) { try { old.close(); } catch (_) {} }
+   teardownAudio();
+ }
+ 
++function switchSource(newDjUrl) {
++  djUrl = newDjUrl;
++  saveDj(djUrl);
++  renderSource();
++  retryCount = 0;
++  disconnect();
++  connect();
++}
++
+ document.getElementById('btn-listen').addEventListener('click', function() {
+-  // Browsers may block audible autoplay. The WebSocket and playlist are already
+-  // connected; this gesture only unlocks/resumes audio playback.
++  // Gesto del usuario: desbloquea/reanuda la reproduccion. La conexion ya esta activa.
+   if (!audioEnabled) {
+-    audioEnabled = true;
+-    this.textContent = '\u23F8 SILENCIAR';
+-    this.classList.add('active');
+-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+-    if (audioEl) audioEl.play().catch(function() {
+-      setStatus('PULSÁ PARA HABILITAR AUDIO', 'connected');
+-    });
++    userMuted = false;
++    setListening(true);
++    showTapHint(false);
++    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
++    if (audioEl) audioEl.play().catch(function() {});
+   } else {
+-    audioEnabled = false;
+-    this.textContent = '\u25B6 ACTIVAR AUDIO';
+-    this.classList.remove('active');
+-    if (audioEl) audioEl.pause();
++    userMuted = true;
++    setListening(false);   // radio en vivo: silenciar, no pausar (evita desfase)
+   }
+ });
+ 
+-document.getElementById('btn-set').addEventListener('click', function() {
+-  var entered = document.getElementById('server-input').value.trim();
+-  serverUrl = toWS(entered) || sameOriginWS('/listen');
+-  document.getElementById('server-input').value = serverUrl;
+-  disconnect();
+-  initAudio();
+-  connect();
+-  if (audioEnabled && audioCtx) audioCtx.resume();
++document.getElementById('btn-dj-set').addEventListener('click', function() {
++  var raw = document.getElementById('dj-input').value.trim();
++  if (!raw) { if (djUrl) switchSource(''); return; }   // campo vacio = volver a la radio propia
++  var norm = normalizeDj(raw);
++  if (!norm) { setStatus('URL DE DJ INVALIDA', ''); return; }
++  if (location.protocol === 'https:' && norm.indexOf('ws://') === 0) {
++    setStatus('USA wss:// (esta pagina es HTTPS)', ''); return;
++  }
++  switchSource(norm);
+ });
+ 
+-// Connect to the playlist as soon as Bubble opens. Audio playback itself may
+-// still need the user's first tap/click due to browser autoplay restrictions.
+-initAudio();
++document.getElementById('btn-dj-clear').addEventListener('click', function() { switchSource(''); });
++
++// Entrada automatica: el oyente se conecta al Listener Loop sin configurar nada.
++renderSource();
+ connect();
+ 
+ document.getElementById('vol').addEventListener('input', function() {
+diff --git a/render.yaml b/render.yaml
+new file mode 100644
+index 0000000..da7c852
+--- /dev/null
++++ b/render.yaml
+@@ -0,0 +1,19 @@
++# Blueprint de Render: despliega AETHERYON Radio (Listener Loop + cliente de escucha) en una URL publica estable.
++# Un WebSocket de larga duracion + AutoDJ continuo requiere una instancia siempre encendida:
++# el plan free se suspende por inactividad y cortaria la emision.
++services:
++  - type: web
++    name: aetheryon-radio
++    runtime: docker
++    dockerfilePath: ./backend/Dockerfile
++    dockerContext: .
++    plan: starter
++    healthCheckPath: /healthz
++    autoDeploy: true
++    envVars:
++      - key: AUTODJ_ENABLED
++        value: "true"
++      - key: AUTODJ_PLAYLIST
++        value: /music/playlist.txt
++      - key: MUSIC_DIR
++        value: /music

@@ -210,6 +210,7 @@ El campo también acepta la URL completa con el parámetro `?server=`. En ese ca
 | `/status` | `GET` | Informa oyentes activos, pico de oyentes y cantidad de chunks enviados. |
 | `/broadcast` | WebSocket | Punto de conexión del DJ para enviar audio. |
 | `/listen` | WebSocket | Punto de conexión de los oyentes para recibir audio. |
+| `/api/playlist/*` | HTTP + Bearer | Playlist dinámica: inyección de noticias desde servicios externos (ver `README.md`, sección *Playlist dinámica*). Requiere `RADIO_API_TOKEN`. |
 
 ## 8. Resolución de problemas (Troubleshooting)
 

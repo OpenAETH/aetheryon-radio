@@ -13,10 +13,19 @@ services:
       AUTODJ_PLAYLIST: /music/playlist.txt
       AUTODJ_RESTART_DELAY: "3"
       MUSIC_DIR: /music
+      # Playlist dinámica (inyección de noticias). Sin RADIO_API_TOKEN la API queda deshabilitada (503).
+      PLAYOUT_ENGINE: continuous
+      RADIO_API_TOKEN: ${RADIO_API_TOKEN:-}
+      NEWS_AFTER_PLAY: ${NEWS_AFTER_PLAY:-delete}
+      NEWS_KEEP_HOURS: ${NEWS_KEEP_HOURS:-24}
     volumes:
       - ./music:/music:ro
+      - news_data:/data/news
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+volumes:
+  news_data:

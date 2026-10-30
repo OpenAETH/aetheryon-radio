@@ -19,6 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
+from playlist import PlaylistStore
+from playlist_api import make_router
+from playout import PlayoutEngine
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LISTENER_TIMEOUT = int(os.getenv("LISTENER_TIMEOUT", "60"))
 DJ_SEND_TIMEOUT = float(os.getenv("DJ_SEND_TIMEOUT", "10"))
@@ -29,6 +33,10 @@ AUTODJ_RESTART_DELAY = float(os.getenv("AUTODJ_RESTART_DELAY", "3"))
 # ffmpeg no soporta -stream_loop con el demuxer concat, asi que el bucle se arma repitiendo la playlist.
 AUTODJ_LOOP_REPEAT = max(1, int(os.getenv("AUTODJ_LOOP_REPEAT", "1000")))
 MUSIC_DIR = Path(os.getenv("MUSIC_DIR", "/music")).resolve()
+# Reproductor: "continuous" (encoder persistente; admite noticias inyectadas) o "legacy" (ffmpeg concat original).
+PLAYOUT_ENGINE = os.getenv("PLAYOUT_ENGINE", "continuous").strip().lower()
+NEWS_DIR = Path(os.getenv("NEWS_DIR", "/data/news"))
+NEWS_MAX_QUEUE = int(os.getenv("NEWS_MAX_QUEUE", "50"))
 STREAM_MIME = 'audio/webm;codecs="opus"'
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -53,9 +61,17 @@ stream_mime = STREAM_MIME
 stream_lock = asyncio.Lock()
 autodj_process: Optional[asyncio.subprocess.Process] = None
 autodj_task: Optional[asyncio.Task] = None
+playout: Optional[PlayoutEngine] = None
+janitor_task: Optional[asyncio.Task] = None
 start_time = time.time()
 stats = {"chunks_relayed": 0, "bytes_relayed": 0, "listeners_peak": 0,
          "listener_timeouts": 0, "dj_sessions": 0, "autodj_restarts": 0}
+
+
+playlist_store = PlaylistStore(NEWS_DIR, max_queue=NEWS_MAX_QUEUE, autoload=False)  # E/S diferida a startup
+app.include_router(make_router(playlist_store, lambda: playout.status() if playout else {"engine": PLAYOUT_ENGINE, "running": False},
+                               lambda item_id: bool(playout and playout.request_skip(item_id)),
+                               injection_enabled=lambda: PLAYOUT_ENGINE == "continuous"))
 
 
 def _vint(data: bytes, offset: int, *, is_size: bool) -> Optional[Tuple[int, int, bool]]:
@@ -321,13 +337,33 @@ async def _kick_dead_listeners() -> None:
             pass
 
 
+async def _playlist_janitor() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            playlist_store.janitor()
+        except Exception:
+            logger.exception("Playlist janitor failed")
+
+
 @app.on_event("startup")
 async def startup() -> None:
-    global autodj_task
+    global autodj_task, playout, janitor_task
     asyncio.create_task(_watchdog())
-    if AUTODJ_ENABLED:
+    try:
+        playlist_store.load()
+        janitor_task = asyncio.create_task(_playlist_janitor())
+    except OSError:
+        logger.exception("Playlist store unavailable at %s; news injection disabled", NEWS_DIR)
+    if AUTODJ_ENABLED and PLAYOUT_ENGINE == "continuous" and janitor_task:
+        playout = PlayoutEngine(playlist_store, load_tracks=_load_playlist, begin_stream=_begin_stream,
+                                publish=_publish_stream_data, new_framer=WebMFramer,
+                                is_dj_live=lambda: dj_connected, get_session=lambda: stream_session)
+        autodj_task = asyncio.create_task(playout.run())
+        logger.info("Continuous playout enabled; news dir=%s", NEWS_DIR)
+    elif AUTODJ_ENABLED:
         autodj_task = asyncio.create_task(_autodj_supervisor())
-        logger.info("AutoDJ supervisor enabled; playlist=%s", AUTODJ_PLAYLIST)
+        logger.info("AutoDJ supervisor enabled (legacy); playlist=%s", AUTODJ_PLAYLIST)
 
 
 async def _watchdog() -> None:
@@ -339,6 +375,8 @@ async def _watchdog() -> None:
 @app.on_event("shutdown")
 async def shutdown() -> None:
     global autodj_task, autodj_process
+    if janitor_task:
+        janitor_task.cancel()
     if autodj_task:
         autodj_task.cancel()
         try:
@@ -373,7 +411,8 @@ async def status():
     return JSONResponse({"dj_online": dj_connected, "source": active_source, "stream_ready": stream_init is not None,
                          "listeners": len(listeners), "peak": stats["listeners_peak"],
                          "chunks_relayed": stats["chunks_relayed"], "bytes_relayed": stats["bytes_relayed"],
-                         "uptime_s": round(time.time() - start_time), "autodj_enabled": AUTODJ_ENABLED}, headers=CORS_HEADERS)
+                         "uptime_s": round(time.time() - start_time), "autodj_enabled": AUTODJ_ENABLED,
+                         "playout": PLAYOUT_ENGINE, "news_queued": len(playlist_store.queued())}, headers=CORS_HEADERS)
 
 
 @app.options("/status")
