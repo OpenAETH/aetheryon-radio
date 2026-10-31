@@ -52,6 +52,7 @@ LISTENER_HTML = PROJECT_DIR / "index.html"
 DJ_HTML = PROJECT_DIR / "frontend" / "dj.html"
 
 listeners: Dict[WebSocket, float] = {}
+unsynced: set = set()      # oyentes que entraron a mitad de una emision en vivo y esperan al proximo Cluster
 dj_ws: Optional[WebSocket] = None
 dj_connected = False
 active_source: Optional[str] = None
@@ -169,6 +170,61 @@ class WebMFramer:
             raise
 
 
+class WebMAligner:
+    """Reenvia solo elementos EBML completos.
+
+    MediaRecorder entrega blobs cortados en cualquier byte (incluso a mitad de un SimpleBlock). Un oyente que
+    entra con la emision en curso recibiria un fragmento y Chrome rechaza el audio ("Unexpected element ID").
+    Aqui se retiene la cola incompleta y solo se emiten elementos enteros; el encabezado del Cluster se emite
+    solo (sus hijos van como elementos independientes). Ante datos que no se pueden alinear, cede el paso crudo.
+    """
+    MAX_BUFFER = 4 * 1024 * 1024
+
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+        self.broken = False
+        self.last_cluster_at: Optional[int] = None     # offset del primer Cluster dentro de lo devuelto por push()
+
+    def push(self, data: bytes) -> bytes:
+        self.last_cluster_at = 0
+        if self.broken:
+            return data
+        self.buffer.extend(data)
+        view = bytes(self.buffer)
+        pos = 0
+        self.last_cluster_at = None
+        try:
+            while True:
+                item = _element(view, pos)
+                if item is None:
+                    break
+                ident, payload, size, unknown = item
+                if ident == WebMFramer.CLUSTER:
+                    if self.last_cluster_at is None:
+                        self.last_cluster_at = pos
+                    end = payload                      # solo el encabezado; los hijos se alinean aparte
+                elif unknown:
+                    raise ValueError("unknown-sized element outside Cluster")
+                else:
+                    end = payload + size
+                    if end > len(view):
+                        break
+                pos = end
+        except ValueError:
+            self.broken = True
+            self.buffer.clear()
+            logger.warning("WebM aligner disabled: stream cannot be split on element boundaries")
+            self.last_cluster_at = 0
+            return view
+        if len(view) - pos > self.MAX_BUFFER:
+            self.broken = True
+            self.buffer.clear()
+            self.last_cluster_at = 0
+            return view
+        del self.buffer[:pos]
+        return view[:pos]
+
+
 async def _send_control(ws: WebSocket, payload: dict) -> bool:
     try:
         await asyncio.wait_for(ws.send_text(json.dumps(payload)), timeout=DJ_SEND_TIMEOUT)
@@ -185,17 +241,28 @@ async def _send_binary(ws: WebSocket, data: bytes) -> bool:
         return False
 
 
-async def _fanout_binary(data: bytes, *, session: str) -> None:
+async def _fanout_binary(data: bytes, *, session: str, sync_at: Optional[int] = 0) -> None:
+    """Difunde a los oyentes. Los que entraron a mitad de una emision en vivo (`unsynced`) esperan al proximo Cluster:
+    Chrome no acepta bloques sueltos tras la cabecera. `sync_at` es el offset del primer Cluster en `data`."""
     if not data:
         return
     async with stream_lock:
         if session != stream_session:
             return  # stale producer after a source switch
-        snapshot = list(listeners)
-        results = await asyncio.gather(*(_send_binary(ws, data) for ws in snapshot), return_exceptions=True)
-        for ws, ok in zip(snapshot, results):
+        targets = []
+        for ws in list(listeners):
+            if ws in unsynced:
+                if sync_at is None:
+                    continue
+                unsynced.discard(ws)
+                targets.append((ws, data[sync_at:]))
+            else:
+                targets.append((ws, data))
+        results = await asyncio.gather(*(_send_binary(ws, d) for ws, d in targets), return_exceptions=True)
+        for (ws, _), ok in zip(targets, results):
             if ok is not True:
                 listeners.pop(ws, None)
+                unsynced.discard(ws)
         stats["chunks_relayed"] += 1
         stats["bytes_relayed"] += len(data)
 
@@ -231,8 +298,13 @@ async def _publish_stream_data(session: str, framer: WebMFramer, data: bytes) ->
                 if ok is not True:
                     listeners.pop(ws, None)
             logger.info("WebM init synchronized (%d bytes) session=%s", len(init), session[:8])
+    aligner = getattr(framer, "aligner", None)          # solo el DJ en vivo (MediaRecorder corta en cualquier byte)
+    sync_at: Optional[int] = 0
+    if media and aligner is not None:
+        media = aligner.push(media)
+        sync_at = aligner.last_cluster_at
     if media:
-        await _fanout_binary(media, session=session)
+        await _fanout_binary(media, session=session, sync_at=sync_at)
 
 
 SUPPORTED_AUDIO = {".mp3", ".wav", ".ogg", ".opus", ".flac", ".m4a", ".aac", ".webm"}
@@ -412,7 +484,8 @@ async def status():
                          "listeners": len(listeners), "peak": stats["listeners_peak"],
                          "chunks_relayed": stats["chunks_relayed"], "bytes_relayed": stats["bytes_relayed"],
                          "uptime_s": round(time.time() - start_time), "autodj_enabled": AUTODJ_ENABLED,
-                         "playout": PLAYOUT_ENGINE, "news_queued": len(playlist_store.queued())}, headers=CORS_HEADERS)
+                         "playout": PLAYOUT_ENGINE, "news_queued": len(playlist_store.queued()),
+                         "now_playing": playout.now_playing if playout else None}, headers=CORS_HEADERS)
 
 
 @app.options("/status")
@@ -446,6 +519,7 @@ async def broadcast_endpoint(ws: WebSocket):
         autodj_process.terminate()
     session = await _begin_stream("live_dj")
     framer = WebMFramer()
+    framer.aligner = WebMAligner()
     logger.info("Live DJ connected; session=%s peer=%s", session[:8], peer)
     close_info = "closed by DJ"
     first_chunk = True
@@ -500,6 +574,8 @@ async def listen_endpoint(ws: WebSocket):
                                      "source": active_source, "mime": stream_mime})
             if stream_init is not None:
                 await _send_binary(ws, stream_init)
+                if active_source == "live_dj":
+                    unsynced.add(ws)             # entra a mitad de una emision en vivo: espera al proximo Cluster
         else:
             await _send_control(ws, {"type": "waiting", "message": "Waiting for audio source"})
         stats["listeners_peak"] = max(stats["listeners_peak"], len(listeners))
@@ -518,6 +594,7 @@ async def listen_endpoint(ws: WebSocket):
         logger.debug("Listener connection ended: %s", exc)
     finally:
         listeners.pop(ws, None)
+        unsynced.discard(ws)
         logger.info("Listener left; total=%d", len(listeners))
 
 

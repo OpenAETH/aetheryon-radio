@@ -179,6 +179,18 @@ header {
 }
 .btn-small:hover { border-color: var(--cyan); color: var(--cyan); }
 
+/* Mezclador: envio (broadcast) / monitor local / monitor del aire */
+.mixer-section { padding: 20px 28px; border-top: 1px solid var(--border); }
+.mix-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.mix-presets .btn-small.active, .mix-row .btn-small.active { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+.mix-row .btn-small.cut.active { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+.mix-row { display: grid; grid-template-columns: 150px 1fr 40px 84px; gap: 10px; align-items: center; margin-bottom: 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.mix-row small { display: block; font-size: 8px; letter-spacing: 0; opacity: .8; text-transform: none; }
+.mix-row input[type=range] { width: 100%; }
+.mix-onair { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 2px; font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+.mix-onair b { color: var(--text); font-weight: 400; }
+.mix-hint { margin-top: 6px; font-family: var(--mono); font-size: 9px; color: var(--amber); min-height: 12px; }
+
 #drop-zone {
   margin: 12px;
   border: 1px dashed var(--border);
@@ -725,6 +737,47 @@ header {
       </div>
     </div>
 
+
+    <!-- MIXER: broadcast / aire -->
+    <div class="mixer-section">
+      <div class="section-title">Mezclador — Broadcast / Aire</div>
+      <div class="mix-presets">
+        <button class="btn-small" data-scene="pgm">SOLO BROADCAST</button>
+        <button class="btn-small" data-scene="air">SOLO AIRE</button>
+        <button class="btn-small" data-scene="both">AMBOS</button>
+        <button class="btn-small" data-scene="none">SILENCIO</button>
+      </div>
+      <div class="mix-row">
+        <span>ENVÍO<small>lo que sale a la radio (afecta a los oyentes)</small></span>
+        <input type="range" id="mix-send" min="0" max="1" step="0.01" value="1">
+        <span id="mix-send-pct">100%</span>
+        <button class="btn-small cut" id="mix-send-mute" title="Silencia lo que sale a la radio; la conexión sigue abierta">CORTAR</button>
+      </div>
+      <div class="mix-row">
+        <span>MONITOR BROADCAST<small>tu mezcla, solo para vos</small></span>
+        <input type="range" id="mix-pgm" min="0" max="1" step="0.01" value="1">
+        <span id="mix-pgm-pct">100%</span>
+        <button class="btn-small" id="mix-pgm-mute">MUTE</button>
+      </div>
+      <div class="mix-row">
+        <span>MONITOR AIRE<small>la radio tal como la oye la audiencia</small></span>
+        <input type="range" id="mix-air" min="0" max="1" step="0.01" value="0.8">
+        <span id="mix-air-pct">80%</span>
+        <button class="btn-small" id="mix-air-mute">MUTE</button>
+      </div>
+      <div class="mix-row">
+        <span>SINTONÍA<small>conecta este panel a /listen</small></span>
+        <span id="mix-air-state">APAGADA</span><span></span>
+        <button class="btn-small" id="mix-air-on">ESCUCHAR</button>
+      </div>
+      <div class="mix-onair" id="mix-onair">
+        EMITIENDO: <b id="oa-source">—</b><br>
+        SUENA: <b id="oa-now">—</b><br>
+        SINTONIZADO EN ESTE PANEL: <b id="oa-tuned">—</b> · OYENTES: <b id="oa-listeners">—</b>
+      </div>
+      <div class="mix-hint" id="mix-hint"></div>
+    </div>
+
   </div><!-- /deck -->
 
   <!-- SERVER PANEL -->
@@ -789,6 +842,7 @@ const state = {
 
 // Audio contexts
 let audioCtx, analyser, sourceNode, micStream, micSource, audioDestination;
+let sendGain, pgmGain, airGain;
 let ws = null;
 let wsWanted = false;        // el DJ quiere estar conectado (false tras pulsar DISCONNECT o ser reemplazado)
 let wsRetry = 0, wsRetryTimer = null, wsPingTimer = null;
@@ -815,11 +869,17 @@ function initAudioCtx() {
   analyser.fftSize = 256;
   // MediaStreamDestination — captures all audio output for broadcast
   audioDestination = audioCtx.createMediaStreamDestination();
+  sendGain = audioCtx.createGain();     // envio: lo que sale a la radio
+  pgmGain  = audioCtx.createGain();     // monitor local de tu mezcla (no afecta al envio)
+  airGain  = audioCtx.createGain();     // monitor del aire (/listen); nunca vuelve al envio
+  sendGain.connect(audioDestination);
+  pgmGain.connect(audioCtx.destination);
+  airGain.connect(audioCtx.destination);
   sourceNode = audioCtx.createMediaElementSource(audio);
   sourceNode.connect(analyser);
-  analyser.connect(audioCtx.destination);
-  // Also route to broadcast destination
-  sourceNode.connect(audioDestination);
+  analyser.connect(pgmGain);            // monitor
+  sourceNode.connect(sendGain);         // broadcast
+  applyMix(true);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1100,7 +1160,7 @@ async function toggleMic() {
       initAudioCtx();
       try { if (audioCtx.state === 'suspended') await audioCtx.resume(); } catch (_) {}
       micSource = audioCtx.createMediaStreamSource(micStream);
-      micSource.connect(audioDestination);
+      micSource.connect(sendGain);        // el mic va al envio, no al monitor (evita eco)
 
       // Stream via WebSocket if connected
       if (state.wsConnected && ws) {
@@ -1173,6 +1233,190 @@ function getSupportedMime() {
   const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
   return types.find(t => MediaRecorder.isTypeSupported(t));
 }
+
+
+// ═══════════════════════════════════════════════════════════
+//  MEZCLADOR: ENVIO / MONITOR BROADCAST / MONITOR AIRE
+//  - ENVIO: nivel de lo que se transmite (los oyentes lo oyen).
+//  - MONITOR BROADCAST y MONITOR AIRE: solo se oyen en este panel; no cambian la emision.
+//  Silenciar la pestana o el sitio en Chrome apaga TODO el audio del origen (incluida la radio abierta
+//  en otra pestana de este mismo host); estos controles son independientes de eso.
+// ═══════════════════════════════════════════════════════════
+const mix = { send: 1, sendCut: false, pgm: 1, pgmMute: false, air: 0.8, airMute: true };
+try { Object.assign(mix, JSON.parse(localStorage.getItem('dj-mix') || '{}')); } catch (_) {}
+
+function $(id) { return document.getElementById(id); }
+function setGain(g, v) { if (g) g.gain.setTargetAtTime(v, audioCtx.currentTime, 0.015); }
+function applyMix(initial) {
+  if (audioCtx) {
+    setGain(sendGain, mix.sendCut ? 0 : mix.send);
+    setGain(pgmGain,  mix.pgmMute ? 0 : mix.pgm);
+    setGain(airGain,  mix.airMute ? 0 : mix.air);
+  }
+  $('mix-send').value = mix.send; $('mix-send-pct').textContent = Math.round(mix.send * 100) + '%';
+  $('mix-pgm').value  = mix.pgm;  $('mix-pgm-pct').textContent  = Math.round(mix.pgm * 100) + '%';
+  $('mix-air').value  = mix.air;  $('mix-air-pct').textContent  = Math.round(mix.air * 100) + '%';
+  $('mix-send-mute').classList.toggle('active', mix.sendCut);
+  $('mix-send-mute').textContent = mix.sendCut ? 'ENVIO CORTADO' : 'CORTAR';
+  $('mix-pgm-mute').classList.toggle('active', mix.pgmMute);
+  $('mix-air-mute').classList.toggle('active', mix.airMute);
+  const scene = (!mix.pgmMute && mix.airMute) ? 'pgm' : (mix.pgmMute && !mix.airMute) ? 'air'
+              : (!mix.pgmMute && !mix.airMute) ? 'both' : 'none';
+  document.querySelectorAll('[data-scene]').forEach(b => b.classList.toggle('active', b.dataset.scene === scene));
+  $('mix-hint').textContent = mix.sendCut ? '⚠ ENVÍO CORTADO: los oyentes reciben silencio.'
+    : (scene === 'both' ? 'AMBOS: el aire llega con 1–3 s de retraso; con altavoces oirás eco. Usá auriculares.' : '');
+  if (!initial) { try { localStorage.setItem('dj-mix', JSON.stringify(mix)); } catch (_) {} }
+}
+function bindMix(id, key, isMute) {
+  const el = $(id);
+  if (isMute) el.addEventListener('click', () => { mix[key] = !mix[key]; applyMix(); });
+  else el.addEventListener('input', e => { mix[key] = parseFloat(e.target.value); applyMix(); });
+}
+bindMix('mix-send', 'send'); bindMix('mix-send-mute', 'sendCut', true);
+bindMix('mix-pgm', 'pgm');   bindMix('mix-pgm-mute', 'pgmMute', true);
+bindMix('mix-air', 'air');   bindMix('mix-air-mute', 'airMute', true);
+
+document.querySelectorAll('[data-scene]').forEach(b => b.addEventListener('click', () => {
+  const sc = b.dataset.scene;
+  mix.pgmMute = (sc === 'air' || sc === 'none');
+  mix.airMute = (sc === 'pgm' || sc === 'none');
+  if ((sc === 'air' || sc === 'both') && !air.wanted) airStart();   // gesto del usuario: permite el audio
+  applyMix();
+}));
+
+// ── Monitor del aire: el panel se conecta a /listen como un oyente mas ──
+const air = { ws: null, wanted: false, retry: 0, timer: null, ping: null, el: null, ms: null, sb: null,
+              ready: false, queue: [], mime: 'audio/webm;codecs="opus"', source: '', session: '' };
+
+function airUrl() { return $('listener-url').value.trim(); }
+function airTeardown() {
+  air.ready = false; air.queue = [];
+  if (air.sb) { try { air.sb.removeEventListener('updateend', airUpdateEnd); } catch (_) {} air.sb = null; }
+  if (air.ms) { try { if (air.ms.readyState === 'open') air.ms.endOfStream(); } catch (_) {} air.ms = null; }
+  if (air.el) { try { air.el.pause(); air.el.src = ''; air.el.remove(); } catch (_) {} air.el = null; }
+}
+function airInit() {
+  airTeardown();
+  initAudioCtx();
+  try { if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (_) {}
+  const el = document.createElement('audio');
+  el.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+  el.playsInline = true;
+  document.body.appendChild(el);
+  air.el = el;
+  audioCtx.createMediaElementSource(el).connect(airGain);   // solo al monitor; jamas al envio
+  const ms = new MediaSource(); air.ms = ms;
+  el.src = URL.createObjectURL(ms);
+  ms.addEventListener('sourceopen', () => {
+    if (air.ms !== ms) return;
+    const cands = [air.mime, 'audio/webm;codecs=opus', 'audio/webm'];
+    const mime = cands.find(m => m && MediaSource.isTypeSupported(m));
+    if (!mime) { $('mix-air-state').textContent = 'CODEC NO SOPORTADO'; return; }
+    try {
+      air.sb = ms.addSourceBuffer(mime); air.sb.mode = 'segments';
+      air.sb.addEventListener('updateend', airUpdateEnd);
+      air.ready = true;
+      el.play().catch(() => {});
+      airAppend();
+    } catch (e) { $('mix-air-state').textContent = 'ERROR MSE'; }
+  });
+}
+function airUpdateEnd() {
+  try {
+    const el = air.el;
+    if (el && air.sb && el.buffered.length) {
+      const start = el.buffered.start(0), cur = el.currentTime;
+      if (cur + 0.05 < start) el.currentTime = start;                       // oyente que entra a mitad de emision
+      else if (cur - start > 30 && !air.sb.updating) { air.sb.remove(start, cur - 20); return; }
+    }
+  } catch (_) {}
+  airAppend();
+}
+function airAppend() {
+  if (!air.ready || !air.sb || air.sb.updating || !air.queue.length) return;
+  if (!air.ms || air.ms.readyState !== 'open') return;
+  try { air.sb.appendBuffer(air.queue.shift()); }
+  catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      try { const b = air.sb.buffered; if (b.length && b.end(0) - b.start(0) > 20) air.sb.remove(b.start(0), b.start(0) + 10); } catch (_) {}
+    }
+  }
+}
+function airSetState(t) { $('mix-air-state').textContent = t; }
+function airTuned() {
+  $('oa-tuned').textContent = air.wanted ? (air.source ? (air.source === 'live_dj' ? 'DJ EN VIVO' : 'AUTODJ') + ' · sesión ' + air.session.slice(0, 6) : 'sintonizando…') : 'apagado';
+}
+function airStart() {
+  air.wanted = true; air.retry = 0;
+  initAudioCtx();
+  $('mix-air-on').textContent = 'DEJAR DE ESCUCHAR'; $('mix-air-on').classList.add('active');
+  airConnect();
+}
+function airStop() {
+  air.wanted = false; clearTimeout(air.timer); clearInterval(air.ping);
+  const old = air.ws; air.ws = null; if (old) { try { old.close(1000, 'monitor off'); } catch (_) {} }
+  airTeardown(); air.source = ''; air.session = '';
+  $('mix-air-on').textContent = 'ESCUCHAR'; $('mix-air-on').classList.remove('active');
+  airSetState('APAGADA'); airTuned();
+}
+function airConnect() {
+  clearTimeout(air.timer);
+  const url = airUrl(); if (!url) return;
+  if (air.ws && air.ws.readyState <= WebSocket.OPEN) return;           // un solo socket de monitor
+  airSetState('CONECTANDO…');
+  let sock; try { sock = new WebSocket(url); } catch (_) { airSetState('URL INVÁLIDA'); return; }
+  air.ws = sock; sock.binaryType = 'arraybuffer';
+  sock.onopen = () => {
+    if (air.ws !== sock) return;
+    air.retry = 0; airSetState('SINTONIZADO');
+    clearInterval(air.ping); air.ping = setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send('ping'); }, 15000);
+  };
+  sock.onmessage = ev => {
+    if (air.ws !== sock) return;
+    if (typeof ev.data === 'string') {
+      let c; try { c = JSON.parse(ev.data); } catch (_) { return; }
+      if (c.type === 'stream_start') {
+        air.mime = c.mime || air.mime; air.source = c.source || ''; air.session = c.session_id || '';
+        airInit(); airTuned(); airSetState('SINTONIZADO');
+      } else if (c.type === 'waiting') airSetState('ESPERANDO EMISIÓN');
+      return;
+    }
+    if (!air.ms) return;
+    air.queue.push(ev.data); airAppend(); airSetState('EN VIVO');
+  };
+  sock.onclose = () => {
+    if (air.ws !== sock) return;
+    clearInterval(air.ping);
+    if (!air.wanted) return;
+    const d = Math.min(15000, 1000 * Math.pow(2, air.retry++));
+    airSetState('REINTENTANDO'); air.timer = setTimeout(airConnect, d);
+  };
+  sock.onerror = () => { if (air.ws === sock) airSetState('ERROR'); };
+}
+$('mix-air-on').addEventListener('click', () => {
+  if (air.wanted) { airStop(); return; }
+  mix.airMute = false; airStart(); applyMix();                          // al sintonizar se desilencia el monitor
+});
+
+// Estado de la emision (independiente de la sintonia): quien emite y que suena
+function statusBase() {
+  const raw = airUrl() || $('server-url').value.trim();
+  return raw.replace('ws://', 'http://').replace('wss://', 'https://').replace(/\/(listen|broadcast)$/, '');
+}
+async function pollOnAir() {
+  try {
+    const d = await (await fetch(statusBase() + '/status')).json();
+    $('oa-source').textContent = d.dj_online ? 'DJ EN VIVO' : (d.source === 'autodj' ? 'AUTODJ' : (d.source || '—'));
+    const np = d.now_playing;
+    $('oa-now').textContent = d.dj_online ? 'tu mezcla (DJ en vivo)' : (np && np.title ? (np.kind === 'news' ? '📰 ' : '♪ ') + np.title : '—');
+    $('oa-listeners').textContent = d.listeners;
+  } catch (_) { $('oa-source').textContent = 'sin conexión'; }
+  airTuned();
+}
+(function () { const l = $('listener-url'); if (l && /localhost:8000/.test(l.value) && /^https?:$/.test(location.protocol))
+  l.value = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/listen'; })();
+setInterval(pollOnAir, 3000); pollOnAir();
+applyMix(true);
 
 // ═══════════════════════════════════════════════════════════
 //  WEBSOCKET SERVER
