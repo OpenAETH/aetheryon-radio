@@ -430,7 +430,10 @@ async def healthz():
 async def broadcast_endpoint(ws: WebSocket):
     global dj_ws, dj_connected
     await ws.accept()
+    peer = f"{ws.client.host}:{ws.client.port}" if ws.client else "?"
     if dj_ws is not None and dj_ws is not ws:
+        # Otro panel DJ (o una pestana duplicada) ya emitia: el nuevo gana, el anterior se cierra con 1008.
+        logger.warning("Live DJ %s replaces the previous DJ connection", peer)
         try:
             await dj_ws.close(code=1008, reason="replaced by new DJ")
         except Exception:
@@ -443,11 +446,14 @@ async def broadcast_endpoint(ws: WebSocket):
         autodj_process.terminate()
     session = await _begin_stream("live_dj")
     framer = WebMFramer()
-    logger.info("Live DJ connected; session=%s", session[:8])
+    logger.info("Live DJ connected; session=%s peer=%s", session[:8], peer)
+    close_info = "closed by DJ"
+    first_chunk = True
     try:
         while True:
             msg = await ws.receive()
             if msg["type"] == "websocket.disconnect":
+                close_info = f"disconnect code={msg.get('code')}"
                 break
             if msg.get("text") is not None:
                 if msg["text"] == "ping":
@@ -456,16 +462,29 @@ async def broadcast_endpoint(ws: WebSocket):
                 continue
             chunk = msg.get("bytes")
             if chunk:
+                if first_chunk:
+                    first_chunk = False
+                    if chunk[:4] != b"\x1a\x45\xdf\xa3":
+                        # El panel envia WebM/Opus; Firefox (ogg) o Safari (mp4) no lo hacen.
+                        logger.warning("Live DJ %s sent a non-WebM stream (magic=%s); rejecting", peer, chunk[:4].hex())
+                        close_info = "unsupported audio format"
+                        await _send_control(ws, {"type": "error", "reason": "unsupported_format",
+                                                 "message": "El audio debe ser WebM/Opus (use Chrome, Edge o Chromium)."})
+                        await ws.close(code=1003, reason="unsupported audio format")
+                        break
                 await _publish_stream_data(session, framer, chunk)
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as e:
+        close_info = f"disconnect code={e.code}"
     except Exception:
+        close_info = "stream error"
         logger.exception("Live DJ stream failed")
     finally:
         if dj_ws is ws:
             dj_ws = None
             dj_connected = False
-            logger.info("Live DJ disconnected; AutoDJ will resume")
+            logger.info("Live DJ disconnected (%s); AutoDJ will resume", close_info)
+        else:
+            logger.info("Replaced DJ connection %s ended (%s)", peer, close_info)
 
 
 @app.websocket("/listen")

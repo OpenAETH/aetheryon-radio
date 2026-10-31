@@ -30,6 +30,8 @@ Copiar los audios a `music/` y listar un archivo por linea en `music/playlist.tx
 
 Un servicio externo (p. ej. TerraGazette) puede enviar audios ya generados y la radio los emite **dentro del mismo stream**, sin reiniciar la emisión, sin el panel DJ y sin reconfigurar nada. La música sigue siendo la cortina; las noticias entran entre pistas (o de inmediato con `priority=high`, con fundido de la música).
 
+**Panel DJ estable.** `/dj` propone por defecto `ws(s)://<host de la pagina>/broadcast` (sirve con Docker `8001`, https y Render). Un solo socket a la vez; si la conexion cae sin que el DJ pulse DISCONNECT, reintenta con backoff (1-15 s) y reinicia la emision con una cabecera WebM nueva; envia `ping` cada 15 s. Si abris dos paneles, el nuevo toma la emision y el anterior queda en OFFLINE (codigo 1008, sin reconexion automatica para evitar un ping-pong). El audio debe ser WebM/Opus (Chrome/Edge); Firefox (ogg) o Safari (mp4) reciben un error explicito (1003). Los logs indican peer, codigo de cierre y si una conexion fue reemplazada.
+
 **Reproductor.** `PLAYOUT_ENGINE=continuous` (por defecto) reemplaza el `ffmpeg concat` por un encoder Opus persistente alimentado con PCM (`backend/playout.py`): el stream WebM es siempre uno (un solo init), de modo que los oyentes no resincronizan. `PLAYOUT_ENGINE=legacy` restaura el AutoDJ original (no admite inyección: la API responde 503). Si entra un DJ en vivo, la noticia en emisión vuelve a la cola (hasta 3 intentos) y se emite cuando el DJ se va.
 
 **Autenticación.** `RADIO_API_TOKEN` (Bearer). Sin token la API queda deshabilitada (503). Definirlo en Render/`.env`, nunca en el repo.

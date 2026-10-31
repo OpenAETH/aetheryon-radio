@@ -790,6 +790,8 @@ const state = {
 // Audio contexts
 let audioCtx, analyser, sourceNode, micStream, micSource, audioDestination;
 let ws = null;
+let wsWanted = false;        // el DJ quiere estar conectado (false tras pulsar DISCONNECT o ser reemplazado)
+let wsRetry = 0, wsRetryTimer = null, wsPingTimer = null;
 let mediaRecorder = null;
 let micAnalyser = null;
 let statusInterval = null;
@@ -1175,49 +1177,96 @@ function getSupportedMime() {
 // ═══════════════════════════════════════════════════════════
 //  WEBSOCKET SERVER
 // ═══════════════════════════════════════════════════════════
+function defaultWsUrl() {
+  // Misma ruta que sirve esta pagina: funciona en docker (8001), detras de https/ngrok y en Render.
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/broadcast';
+  }
+  return 'ws://localhost:8000/broadcast';
+}
+(function () { const i = document.getElementById('server-url'); if (i && /localhost:8000/.test(i.value)) i.value = defaultWsUrl(); })();
+
+function clearWsTimers() {
+  clearTimeout(wsRetryTimer); clearInterval(wsPingTimer);
+  clearInterval(statusInterval); clearInterval(bitrateTimer);
+}
+
+function setWsUi(online, label) {
+  state.wsConnected = online;
+  document.getElementById('btn-connect').textContent = online ? 'DISCONNECT' : (wsWanted ? 'CANCEL' : 'CONNECT');
+  document.getElementById('btn-connect').classList.toggle('connected', online);
+  document.getElementById('ws-pill').textContent = label;
+  document.getElementById('ws-pill').className   = online ? 'pill pill-on' : 'pill pill-off';
+  document.getElementById('stat-status').textContent = online ? 'CONNECTED' : (wsWanted ? 'RECONNECTING' : 'OFFLINE');
+}
+
 function connectWS() {
   const url = document.getElementById('server-url').value.trim();
   if (!url) return;
+  // Un solo socket a la vez: un doble clic abria dos y el servidor cerraba el primero (1008),
+  // dejando el panel en OFFLINE aunque el segundo siguiera vivo.
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  wsWanted = true;
+  clearTimeout(wsRetryTimer);
   log('Connecting → ' + url, 'info');
-  ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
+  setWsUi(false, 'WS CONNECTING');
+  const sock = new WebSocket(url);
+  ws = sock;
+  sock.binaryType = 'arraybuffer';
 
-  ws.onopen = () => {
-    state.wsConnected = true;
-    document.getElementById('btn-connect').textContent = 'DISCONNECT';
-    document.getElementById('btn-connect').classList.add('connected');
-    document.getElementById('ws-pill').textContent   = 'WS ONLINE';
-    document.getElementById('ws-pill').className     = 'pill pill-on';
-    document.getElementById('stat-status').textContent = 'CONNECTED';
+  sock.onopen = () => {
+    if (sock !== ws) { try { sock.close(1000, 'stale'); } catch (_) {} return; }
+    wsRetry = 0;
+    setWsUi(true, 'WS ONLINE');
     log('✓ Connected to server', 'ok');
-    // Si ya hay música sonando o el mic está live, empezar a transmitir
+    // La nueva sesion necesita una cabecera WebM nueva: MediaRecorder se reinicia siempre.
+    stopAudioBroadcast();
     if (state.playing || state.micLive) startAudioBroadcast();
-    // Poll stats
+    clearInterval(statusInterval); clearInterval(bitrateTimer); clearInterval(wsPingTimer);
     statusInterval = setInterval(fetchStats, 3000);
     bitrateTimer   = setInterval(calcBitrate, 1000);
+    // Keepalive: evita que proxies/NAT cierren el socket cuando no hay audio fluyendo.
+    wsPingTimer    = setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send('ping'); }, 15000);
   };
-  ws.onclose = () => {
-    state.wsConnected = false;
-    document.getElementById('btn-connect').textContent = 'CONNECT';
-    document.getElementById('btn-connect').classList.remove('connected');
-    document.getElementById('ws-pill').textContent = 'WS OFFLINE';
-    document.getElementById('ws-pill').className   = 'pill pill-off';
-    document.getElementById('stat-status').textContent = 'OFFLINE';
+  sock.onmessage = ev => {
+    if (typeof ev.data !== 'string' || ev.data === 'pong') return;
+    try {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'error') log('⚠ Servidor: ' + (m.message || m.reason || 'error'), 'error');
+    } catch (_) {}
+  };
+  sock.onclose = ev => {
+    if (sock !== ws) return;            // evento de un socket ya reemplazado: se ignora
     stopAudioBroadcast();
-    clearInterval(statusInterval);
-    clearInterval(bitrateTimer);
-    log('✗ Disconnected', 'warn');
+    clearInterval(statusInterval); clearInterval(bitrateTimer); clearInterval(wsPingTimer);
+    const why = `code=${ev.code}${ev.reason ? ' reason=' + ev.reason : ''}`;
+    if (ev.code === 1008 || ev.code === 1003) {
+      // Reemplazado por otro panel DJ o formato no soportado: reconectar solo provocaria un ping-pong.
+      wsWanted = false;
+      setWsUi(false, 'WS OFFLINE');
+      log(ev.code === 1008 ? '✗ Otro panel DJ tomó la emisión (' + why + ')' : '✗ Servidor rechazó el audio (' + why + ')', 'warn');
+      return;
+    }
+    if (!wsWanted) { setWsUi(false, 'WS OFFLINE'); log('✗ Disconnected (' + why + ')', 'warn'); return; }
+    const delay = Math.min(15000, 1000 * Math.pow(2, wsRetry++));
+    setWsUi(false, 'WS RETRY');
+    log(`✗ Conexión perdida (${why}); reintentando en ${Math.round(delay / 1000)}s`, 'warn');
+    wsRetryTimer = setTimeout(connectWS, delay);
   };
-  ws.onerror = () => log('⚠ WebSocket error', 'error');
+  sock.onerror = () => { if (sock === ws) log('⚠ WebSocket error', 'error'); };
 }
 
 function disconnectWS() {
+  wsWanted = false;
+  clearTimeout(wsRetryTimer);
   stopAudioBroadcast();
-  if (ws) ws.close();
+  if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000, 'dj disconnect');
+  else setWsUi(false, 'WS OFFLINE');
 }
 
 document.getElementById('btn-connect').addEventListener('click', () => {
-  state.wsConnected ? disconnectWS() : connectWS();
+  if (ws && ws.readyState === WebSocket.CONNECTING) return;   // doble clic: el segundo se ignora
+  (state.wsConnected || wsWanted) ? disconnectWS() : connectWS();
 });
 
 async function fetchStats() {

@@ -240,7 +240,9 @@ def test_corrupt_news_fails_without_stopping_the_radio(tmp_path):
         item = rig.enqueue(bad, 1, priority="high")
         ok = rig.enqueue(make_audio(tmp_path / "ok.wav", 0.8, 900), 2, priority="high")
         task = asyncio.create_task(rig.engine.run())
-        assert await rig.wait_for(lambda: rig.store.get(ok["id"])["status"] == PLAYED, 25)
+        # Ambas deben llegar a un estado final (el orden entre ellas no importa para lo que se prueba).
+        assert await rig.wait_for(lambda: rig.store.get(ok["id"])["status"] == PLAYED
+                                  and rig.store.get(item["id"])["status"] == FAILED, 25)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         return rig, item
