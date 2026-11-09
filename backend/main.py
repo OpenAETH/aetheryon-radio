@@ -17,6 +17,7 @@ from typing import Dict, Optional, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from playlist import PlaylistStore
@@ -73,6 +74,15 @@ playlist_store = PlaylistStore(NEWS_DIR, max_queue=NEWS_MAX_QUEUE, autoload=Fals
 app.include_router(make_router(playlist_store, lambda: playout.status() if playout else {"engine": PLAYOUT_ENGINE, "running": False},
                                lambda item_id: bool(playout and playout.request_skip(item_id)),
                                injection_enabled=lambda: PLAYOUT_ENGINE == "continuous"))
+
+
+APP_DIR = Path(__file__).resolve().parent
+_STATIC_DIR = APP_DIR / "static"
+
+# Mount static files if /static directory exists
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
 
 
 def _vint(data: bytes, offset: int, *, is_size: bool) -> Optional[Tuple[int, int, bool]]:
