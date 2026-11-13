@@ -244,6 +244,7 @@ function renderSource() {
 var ws          = null;
 var audioCtx    = null;
 var analyser    = null;
+var rrAnalyser  = null;   // Rocket Radio: nivel de voz sin pasar por el volumen
 var gainNode    = null;
 var audioEnabled = false;   // true = sonando (autoplay ok o tras un toque)
 var userMuted   = false;   // el oyente silencio explicitamente
@@ -366,6 +367,11 @@ function initAudio() {
   var mediaSrc = audioCtx.createMediaElementSource(audioEl);
   mediaSrc.connect(gainNode);
 
+  // Rocket Radio: analizador tomado ANTES del volumen, para animar la boca con la voz real
+  rrAnalyser = audioCtx.createAnalyser();
+  rrAnalyser.fftSize = 256;
+  mediaSrc.connect(rrAnalyser);
+
   mediaSource = new MediaSource();
   audioEl.src = URL.createObjectURL(mediaSource);
 
@@ -386,6 +392,17 @@ function initAudio() {
     }
   });
 }
+
+// Rocket Radio: publica el nivel de audio (0..1) para la animacion (misma origen/navegador)
+var rrChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('rocket-radio') : null;
+var rrBuf = new Uint8Array(256);
+setInterval(function() {
+  if (!rrChannel || !rrAnalyser) return;
+  rrAnalyser.getByteTimeDomainData(rrBuf);
+  var sum = 0;
+  for (var i = 0; i < rrBuf.length; i++) { var v = (rrBuf[i] - 128) / 128; sum += v * v; }
+  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5) });
+}, 40);
 
 function teardownAudio() {
   // Bajar el flag PRIMERO — cualquier updateend o onmessage en vuelo
