@@ -138,6 +138,8 @@ class PlayoutEngine:
         self.restarts = 0
         self.now_playing: Optional[dict] = None
         self._np_t0 = 0.0
+        self._fed_bytes = 0                       # PCM entregado al encoder desde que arranco = reloj del stream
+        self.timeline: List[dict] = []            # ultimos inicios de item con su instante en el reloj del stream
         self._buf: Optional[PCMQueue] = None
         self._skip_id: Optional[str] = None
         self._current_news: Optional[str] = None
@@ -148,6 +150,11 @@ class PlayoutEngine:
         """now_playing + segundos transcurridos del ítem (la animación lo usa para sincronizar titulares)."""
         np = self.now_playing
         return {**np, "elapsed_s": round(time.monotonic() - self._np_t0, 1)} if np else None
+
+    def sync_view(self) -> dict:
+        """Reloj del stream: posicion actual del encoder y los ultimos inicios de item. La animacion los compara
+        con audioEl.currentTime del oyente (los timecodes del WebM son el mismo reloj) y no necesita estimar desfases."""
+        return {"media_now_s": round(self._fed_bytes / BYTES_PER_SECOND, 2), "timeline": list(self.timeline)}
 
     def status(self) -> dict:
         return {"engine": "playout", "running": self.running, "restarts": self.restarts,
@@ -196,6 +203,7 @@ class PlayoutEngine:
                             len(self.store.queued()))
                 enc = await self.spawn(*self._encoder_cmd(), stdin=asyncio.subprocess.PIPE,
                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                self._fed_bytes, self.timeline = 0, []     # encoder nuevo = reloj del stream en cero
                 self.running = True
                 failed = await self._pump(session, framer, enc)
             except FileNotFoundError:
@@ -266,11 +274,14 @@ class PlayoutEngine:
         while True:
             entry = await buf.get(timeout=0.25)
             if entry is None:                       # el productor se retrasó: silencio para no cortar el stream
-                enc.stdin.write(silence(100))
+                sil = silence(100)
+                self._fed_bytes += len(sil)
+                enc.stdin.write(sil)
                 await enc.stdin.drain()
                 continue
             kind, data, meta = entry
             if kind == "pcm":
+                self._fed_bytes += len(data)
                 enc.stdin.write(data)
                 await enc.stdin.drain()
             elif kind == "start":
@@ -278,6 +289,8 @@ class PlayoutEngine:
                 if meta.get("chyron"):
                     self.now_playing["chyron"] = meta["chyron"]
                 self._np_t0 = time.monotonic()
+                self.now_playing["media_s"] = round(self._fed_bytes / BYTES_PER_SECOND, 3)
+                self.timeline = (self.timeline + [dict(self.now_playing)])[-12:]
                 if meta.get("id"):
                     self.store.mark_playing(meta["id"])
             elif kind == "end":

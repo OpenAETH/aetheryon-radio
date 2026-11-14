@@ -406,7 +406,8 @@ setInterval(function() {
   if (audioEl && audioEl.buffered && audioEl.buffered.length) {
     lag = audioEl.buffered.end(audioEl.buffered.length - 1) - audioEl.currentTime;
   }
-  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5), lag: lag > 0 ? lag : 0 });
+  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5), lag: lag > 0 ? lag : 0,
+                         pos: audioEl ? audioEl.currentTime : 0, playing: !!(audioEl && !audioEl.paused) });
 }, 40);
 
 function teardownAudio() {
