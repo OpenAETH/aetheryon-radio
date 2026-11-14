@@ -17,18 +17,23 @@ button{cursor:pointer}button:hover,button:focus-visible{border-color:var(--ac);o
 #dl{width:70px}
 #st,#help{color:var(--mut);font-size:12px}
 #log{width:100%;max-height:84px;overflow:auto;color:var(--mut);font:12px ui-monospace,monospace}
+body.emision{padding:0;gap:0;justify-content:center;height:100vh;overflow:hidden;background:#000}
+body.emision canvas{width:min(100vw,calc(100vh*854/480));border-radius:0}
+body.emision .p{display:none}
 </style>
 </head>
 <body>
 <canvas id="c" width="854" height="480" aria-label="Escena animada de Rocket Radio"></canvas>
-<div class="p">
+<div class="p" id="panel">
   <button id="bd">Iniciar demo</button>
+  <button id="bf">Pantalla completa (F)</button>
+  <button id="bh">Modo emisión (H)</button>
   <input id="u" placeholder="URL de la radio, por ejemplo https://tu-radio.onrender.com">
   <button id="bc">Conectar a la radio</button>
   <label>Ajuste extra (s) <input id="dl" type="number" value="0" min="-10" max="30" step="0.5"></label>
   <span id="st">Sin conexión</span>
   <div id="log"></div>
-  <div id="help">Teclas: 1 y 2 cambian de escena, M música, N noticia, S spot, O y T emociones.</div>
+  <div id="help">Teclas: F pantalla completa, H modo emisión (oculta este panel), 1 y 2 escenas, M música, N noticia, S spot, O y T emociones. Atajo: ?radio=URL&amp;modo=emision conecta solo.</div>
 </div>
 <script>
 // ===== Datos: escenas y personajes (esto es lo que luego puede venir de un JSON) =====
@@ -38,8 +43,8 @@ const SCENES={
          {t:'text',x:427,y:80,s:'BAR GALÁCTICO',c:'#5ef2ff',f:'bold 42px system-ui'}],
   chars:{cap:{x:250,y:300},nova:{x:430,y:300}}},
  cabina:{sky:['#0f2a3d','#16475f'],floor:'#0b1c28',
-  props:[{t:'rect',x:60,y:50,w:160,h:46,c:'#ff2d55'},{t:'rect',x:150,y:330,w:560,h:24,c:'#2d6a8a'},
-         {t:'text',x:140,y:83,s:'AL AIRE',c:'#fff',f:'bold 26px system-ui'}],
+  props:[{t:'rect',x:60,y:50,w:160,h:46,c:'#ff2d55',live:1},{t:'rect',x:150,y:330,w:560,h:24,c:'#2d6a8a'},
+         {t:'text',x:140,y:83,s:'AL AIRE',c:'#fff',f:'bold 26px system-ui',live:1}],
   chars:{cap:{x:300,y:300},nova:{x:520,y:300}}}
 };
 const CHARS={cap:{body:'#ffb347',head:'#ffd9a0',name:'Cap'},nova:{body:'#5ef2ff',head:'#c8f7ff',name:'Nova'}};
@@ -51,12 +56,12 @@ const STATES={
 
 // ===== Estado y API pública =====
 const RR=window.RocketRadio={analyser:null,delay:0,lag:null};
-const S={mode:'music',t0:0,seg:-1,chyron:null,chAt:0,scene:'bar',title:'Esperando señal…',who:{cap:{st:'idle',until:0},nova:{st:'idle',until:0}}};
+const S={fadeAt:0,track:'',mode:'music',t0:0,seg:-1,chyron:null,chAt:0,scene:'bar',title:'Esperando señal…',who:{cap:{st:'idle',until:0},nova:{st:'idle',until:0}}};
 const $=id=>document.getElementById(id);
 const log=t=>{const l=$('log');l.insertAdjacentHTML('afterbegin','<div>'+t+'</div>');while(l.children.length>30)l.lastChild.remove()};
 
 // ===== Director: reglas evento → escena y estados =====
-const setScene=n=>{if(SCENES[n])S.scene=n};
+const setScene=n=>{if(SCENES[n]&&n!==S.scene){S.scene=n;S.fadeAt=performance.now()}};   // fundido al cambiar de escena
 const setState=(c,st,ms)=>{const w=S.who[c];w.st=st;w.until=ms?performance.now()+ms:0};
 const allState=st=>{for(const c in S.who)setState(c,st)};
 let talkTimer=null,turn=0;
@@ -79,7 +84,7 @@ const show=(e,tag,mode)=>{
   S.t0=performance.now()-(e.elapsed||0)*1000;S.seg=-1;S.chAt=performance.now();S.mstart=e.mstart??null;
 };
 const RULES={
- music(e){stopTalk();S.mode='music';setScene('bar');allState('dance');S.chyron=null;S.title='Música: '+(e.titulo||'en la radio')},
+ music(e){stopTalk();S.mode='music';S.track=e.titulo||'';S.chAt=performance.now();setScene('bar');allState('dance');S.chyron=null;S.title='Música: '+(e.titulo||'en la radio')},
  news(e){setScene('cabina');show(e,'Noticia','news');startTalk('serio',.15)},
  spot(e){setScene('bar');show(e,'Spot','spot');startTalk('idle',.35)}
 };
@@ -113,7 +118,8 @@ function level(t){
 }
 
 // ===== Render (aquí se reemplazaría el dibujo por sprites de un atlas) =====
-const cv=$('c'),g=cv.getContext('2d'),W=854,H=480;
+const cv=$('c'),g=cv.getContext('2d'),W=854,H=480,K=2;
+cv.width=W*K;cv.height=H*K;   // resolución interna x2: nítido en pantalla completa y retina
 function puppet(id,pos,t){
   const w=S.who[id],c=CHARS[id];
   if(w.until&&t>w.until){w.st=S.mode==='music'?'dance':S.mode==='news'?'serio':'idle';w.until=0}
@@ -155,11 +161,19 @@ function fit(s,w,px,wt){
 }
 function chyron(t){
   const c=S.chyron;g.textAlign='left';const sg=c&&seg(t);
-  if(!c){g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,430,W,50);g.fillStyle='#fff';g.font='bold 20px system-ui';g.fillText(S.title+(real?'   (voz real)':''),20,462);return}
+  if(!c){   // sin noticia: tarjeta "Ahora suena"
+    const k=Math.min(1,(t-S.chAt)/450);g.save();g.translate(-Math.pow(1-k,3)*W,0);
+    g.font='bold 13px system-ui';const tg='AHORA SUENA',tw=g.measureText(tg).width+28;
+    g.fillStyle='#ffb347';g.fillRect(30,396,tw,24);g.fillStyle='#1a1030';g.fillText(tg,44,413);
+    g.fillStyle='rgba(12,10,32,.92)';g.fillRect(30,420,560,40);
+    g.fillStyle='#fff';g.fillText(fit(S.track||'Música de la radio',530,22,'bold '),46,447);
+    g.restore();return;
+  }
   const k=Math.min(1,(t-S.chAt)/450);
   g.save();g.translate((Math.pow(1-k,3)*-1)*W,0);      // entra deslizando desde la izquierda
   g.font='bold 14px system-ui';const tag=((sg&&sg.tag)||c.tag||'').toUpperCase(),tw=g.measureText(tag).width+28;
   g.fillStyle='#e11d48';g.fillRect(30,344,tw,26);g.fillStyle='#fff';g.fillText(tag,44,362);
+  if(c.segments&&S.seg>=0){g.font='bold 13px system-ui';g.textAlign='right';g.fillText((S.seg+1)+' / '+c.segments.length,824,362);g.textAlign='left'}   // nota N de M
   g.fillStyle='rgba(12,10,32,.92)';g.fillRect(30,370,794,48);
   g.fillStyle='#fff';g.fillText(fit((sg?sg.headline:c.headline)||'',760,26,'bold '),46,404);
   const dk=sg?sg.deck:c.deck;if(dk){g.fillStyle='rgba(42,26,74,.92)';g.fillRect(30,418,794,26);g.fillStyle='#ffd9a0';g.fillText(fit(dk,760,16,''),46,436)}
@@ -171,19 +185,28 @@ function chyron(t){
 }
 function frame(t){
   requestAnimationFrame(frame);
+  g.setTransform(K,0,0,K,0,0);
   lv=level(t);
   const mn=mediaNow();while(pending.length&&mn!=null&&mn>=pending[0].media_s)fire(pending.shift());   // eventos exactos por reloj de audio
   const sc=SCENES[S.scene],gr=g.createLinearGradient(0,0,0,H);
   gr.addColorStop(0,sc.sky[0]);gr.addColorStop(1,sc.sky[1]);
   g.fillStyle=gr;g.fillRect(0,0,W,H);
   g.fillStyle=sc.floor;g.fillRect(0,300,W,180);
+  g.fillStyle=S.scene==='bar'?'#ff5d8f':'#5ef2ff';g.globalAlpha=.28;          // ecualizador de fondo: sigue el volumen
+  for(let i=0;i<32;i++){const h=14+70*(real?lv:lv*.4)*(.35+.65*Math.abs(Math.sin(t/230+i*.8)));g.fillRect(14+i*26,300-h,16,h)}
   for(const p of sc.props){
+    g.globalAlpha=p.live&&Math.floor(t/700)%2?.45:1;                           // "AL AIRE" parpadea
     g.fillStyle=p.c;
     if(p.t==='rect')g.fillRect(p.x,p.y,p.w,p.h);
     else{g.font=p.f;g.textAlign='center';g.fillText(p.s,p.x,p.y)}
   }
+  g.globalAlpha=1;
   for(const id in sc.chars)puppet(id,sc.chars[id],t);
   chyron(t);
+  const fa=1-(t-S.fadeAt)/450;if(fa>0){g.fillStyle='rgba(0,0,0,'+fa+')';g.fillRect(0,0,W,H)}
+  g.textAlign='right';g.font='bold 14px system-ui';g.fillStyle='rgba(255,255,255,.85)';   // reloj y señal real
+  g.fillText(new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),W-18,28);
+  if(real){g.fillStyle='#4ade80';g.beginPath();g.arc(W-70,23,4,0,7);g.fill()}
 }
 requestAnimationFrame(frame);
 
@@ -215,6 +238,7 @@ $('bc').onclick=()=>{
   clearInterval(poll);seenTl.clear();pending.length=0;last='';
   const base=$('u').value.trim().replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/(listen)?\/?$/,'');
   if(!base){$('st').textContent='Sin conexión';return}
+  try{localStorage.setItem('rr_url',base)}catch(_){}
   const tick=async()=>{
     try{
       const j=await(await fetch(base+'/status')).json(),np=j.now_playing;
@@ -227,6 +251,9 @@ $('bc').onclick=()=>{
   tick();poll=setInterval(tick,600);
 };
 
+const toggleFull=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
+const toggleEmision=()=>document.body.classList.toggle('emision');
+$('bf').onclick=toggleFull;$('bh').onclick=toggleEmision;
 // ===== Fuente 3: teclado manual =====
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;
@@ -234,9 +261,18 @@ addEventListener('keydown',e=>{
   const m={'1':()=>setScene('bar'),'2':()=>setScene('cabina'),
     m:()=>RR.emit({tipo:'music'},1),n:()=>RR.emit({tipo:'news',titulo:'Noticia manual'},1),
     s:()=>RR.emit({tipo:'spot',titulo:'Spot manual'},1),
-    o:()=>setState('cap','oh',1200),t:()=>setState('nova','tos',1200)};
+    o:()=>setState('cap','oh',1200),t:()=>setState('nova','tos',1200),f:toggleFull,h:toggleEmision};
   (m[k]||(()=>{}))();
 });
+// ===== Arranque: ?radio=URL&modo=emision (sin panel, conecta solo). Sirviendo la pagina desde la radio usa su propio origen =====
+{
+  const q=new URLSearchParams(location.search);let saved='';
+  try{saved=localStorage.getItem('rr_url')||''}catch(_){}
+  const url=q.get('radio')||saved||(location.protocol.startsWith('http')?location.origin:'');
+  $('u').value=url;
+  if(q.get('modo')==='emision')document.body.classList.add('emision');
+  if(url&&(q.get('modo')==='emision'||q.has('auto')))$('bc').click();
+}
 </script>
 </body>
 </html>
