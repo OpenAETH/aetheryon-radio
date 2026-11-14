@@ -23,6 +23,15 @@ from typing import Awaitable, Callable, List, Optional
 
 from playlist import PlaylistStore
 
+
+def chyron_of(item: dict) -> Optional[dict]:
+    """Faldón de la edición (+ sus titulares con tiempos) tal como lo publica /status."""
+    md = item.get("metadata") or {}
+    out = dict(md.get("chyron") or {})
+    if md.get("segments"):
+        out["segments"] = md["segments"]
+    return out or None
+
 logger = logging.getLogger("aetheryon-radio.playout")
 
 SAMPLE_RATE = 48000
@@ -128,12 +137,18 @@ class PlayoutEngine:
         self.running = False
         self.restarts = 0
         self.now_playing: Optional[dict] = None
+        self._np_t0 = 0.0
         self._buf: Optional[PCMQueue] = None
         self._skip_id: Optional[str] = None
         self._current_news: Optional[str] = None
         self._last_idle_log = 0.0
 
     # ── API para el resto del servidor ──────────────────────────────────
+    def now_playing_view(self) -> Optional[dict]:
+        """now_playing + segundos transcurridos del ítem (la animación lo usa para sincronizar titulares)."""
+        np = self.now_playing
+        return {**np, "elapsed_s": round(time.monotonic() - self._np_t0, 1)} if np else None
+
     def status(self) -> dict:
         return {"engine": "playout", "running": self.running, "restarts": self.restarts,
                 "now_playing": self.now_playing, "buffered_s": round(len(self._buf) * CHUNK / BYTES_PER_SECOND, 2) if self._buf else 0.0}
@@ -262,6 +277,7 @@ class PlayoutEngine:
                 self.now_playing = {"kind": meta["kind"], "title": meta["title"], "id": meta.get("id")}
                 if meta.get("chyron"):
                     self.now_playing["chyron"] = meta["chyron"]
+                self._np_t0 = time.monotonic()
                 if meta.get("id"):
                     self.store.mark_playing(meta["id"])
             elif kind == "end":
@@ -309,7 +325,7 @@ class PlayoutEngine:
         self._current_news = item["id"]
         self._skip_id = None
         await self._play_file(buf, path, kind=item["kind"], title=item["title"] or item["external_id"],
-                              item_id=item["id"], chyron=(item.get("metadata") or {}).get("chyron"))
+                              item_id=item["id"], chyron=chyron_of(item))
 
     async def _play_file(self, buf: PCMQueue, path: Path, *, kind: str, title: str,
                          item_id: Optional[str] = None, chyron: Optional[dict] = None) -> bool:

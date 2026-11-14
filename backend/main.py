@@ -495,7 +495,7 @@ async def status():
                          "chunks_relayed": stats["chunks_relayed"], "bytes_relayed": stats["bytes_relayed"],
                          "uptime_s": round(time.time() - start_time), "autodj_enabled": AUTODJ_ENABLED,
                          "playout": PLAYOUT_ENGINE, "news_queued": len(playlist_store.queued()),
-                         "now_playing": playout.now_playing if playout else None}, headers=CORS_HEADERS)
+                         "now_playing": (getattr(playout, "now_playing_view", lambda: playout.now_playing)() if playout else None)}, headers=CORS_HEADERS)
 
 
 @app.options("/status")

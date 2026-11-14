@@ -37,6 +37,30 @@ def clean_chyron(raw) -> Optional[dict]:
     out = {k: str(raw[k]).strip()[:n] for k, n in CHYRON_LIMITS.items() if raw.get(k)}
     return out or None
 
+
+def layout_segments(raw, duration_s: float) -> list:
+    """Titulares de una edición con su momento en el audio: [{headline, deck, tag, at_s}].
+    Cada segmento puede traer `at_s` (segundos) o un peso `w` / `text` para repartir la duración en proporción."""
+    if not isinstance(raw, list):
+        return []
+    items = []
+    for r in raw[:12]:
+        if not isinstance(r, dict) or not r.get("headline"):
+            continue
+        seg = {k: str(r[k]).strip()[:CHYRON_LIMITS[k]] for k in ("headline", "deck", "tag") if r.get(k)}
+        try:
+            w = max(float(r.get("w") or len(str(r.get("text") or "")) or 1), 1.0)
+        except (TypeError, ValueError):
+            w = 1.0
+        at = r.get("at_s")
+        items.append((seg, w, float(at) if isinstance(at, (int, float)) else None))
+    total, acc, out = sum(w for _, w, _ in items) or 1.0, 0.0, []
+    for seg, w, at in items:
+        seg["at_s"] = round(min(max(at if at is not None else duration_s * acc / total, 0.0), duration_s), 1)
+        acc += w
+        out.append(seg)
+    return sorted(out, key=lambda s: s["at_s"])
+
 logger = logging.getLogger("aetheryon-radio.playlist-api")
 
 EXT_BY_FORMAT = (("mp3", "mp3"), ("wav", "wav"), ("ogg", "ogg"), ("flac", "flac"), ("matroska", "webm"),
@@ -113,6 +137,8 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
                 raise HTTPException(422, "audio vacío o demasiado corto")
             if duration > cfg.max_duration_s:
                 raise HTTPException(413, f"audio demasiado largo (máx {int(cfg.max_duration_s)} s)")
+            if metadata.get("segments"):
+                metadata["segments"] = layout_segments(metadata["segments"], duration)
             names = str(fmt.get("format_name", ""))
             ext = next((e for key, e in EXT_BY_FORMAT if key in names), None)
             if ext is None:
@@ -158,10 +184,10 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
         if raw_meta:
             try:
                 metadata = json.loads(raw_meta)
-                if not isinstance(metadata, dict) or len(raw_meta) > 2048:
+                if not isinstance(metadata, dict) or len(raw_meta) > 8192:
                     raise ValueError
             except ValueError:
-                raise HTTPException(422, "X-Metadata debe ser un objeto JSON de hasta 2 KB")
+                raise HTTPException(422, "X-Metadata debe ser un objeto JSON de hasta 8 KB")
             if "chyron" in metadata:
                 metadata["chyron"] = clean_chyron(metadata["chyron"])
         claimed = request.headers.get("x-content-sha256", "").strip().lower()
@@ -269,6 +295,7 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
                             title=str(body.get("title") or external_id)[:200], kind=body.get("kind", "news"),
                             priority=body.get("priority", "normal"), source=f"tts:{engine}",
                             ttl_s=cfg.default_ttl_s, metadata={"text_chars": len(text), "voice": voice,
-                                      "chyron": clean_chyron(body.get("chyron"))})
+                                      "chyron": clean_chyron(body.get("chyron")),
+                                      "segments": body.get("segments")})
 
     return router
