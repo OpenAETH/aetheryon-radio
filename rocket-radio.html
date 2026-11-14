@@ -76,7 +76,7 @@ function startTalk(base,react){
 const show=(e,tag,mode)=>{
   S.mode=mode;S.title=tag+': '+(e.titulo||'');
   S.chyron={tag,headline:e.titulo,...e.chyron};
-  S.t0=performance.now()-(e.elapsed||0)*1000;S.seg=-1;S.chAt=performance.now();
+  S.t0=performance.now()-(e.elapsed||0)*1000;S.seg=-1;S.chAt=performance.now();S.mstart=e.mstart??null;
 };
 const RULES={
  music(e){stopTalk();S.mode='music';setScene('bar');allState('dance');S.chyron=null;S.title='Música: '+(e.titulo||'en la radio')},
@@ -96,9 +96,11 @@ RULES.music({});   // arranca bailando: sin noticia en el aire, la música manda
 // ===== Nivel de voz para la boca =====
 // Prioridad: 1) nivel real enviado por la pagina de escucha de la radio (BroadcastChannel),
 // 2) un analizador propio en RocketRadio.analyser, 3) nivel simulado.
-let ext={v:0,t:0};
+let ext={v:0,t:0},clk=null;
+// Reloj del audio: posicion del <audio> del oyente (== reloj del encoder del servidor), extrapolada entre mensajes
+const mediaNow=()=>clk&&performance.now()-clk.t<1500?clk.p+(performance.now()-clk.t)/1000-RR.delay:null;
 if(typeof BroadcastChannel!=='undefined'){
-  new BroadcastChannel('rocket-radio').onmessage=m=>{ext={v:m.data.level||0,t:performance.now()};if(typeof m.data.lag==='number')RR.lag=RR.lag==null?m.data.lag:RR.lag*.9+m.data.lag*.1};
+  new BroadcastChannel('rocket-radio').onmessage=m=>{ext={v:m.data.level||0,t:performance.now()};if(typeof m.data.pos==='number'&&m.data.playing)clk={p:m.data.pos,t:performance.now()};if(typeof m.data.lag==='number')RR.lag=RR.lag==null?m.data.lag:RR.lag*.9+m.data.lag*.1};
 }
 const buf=new Uint8Array(256);let lv=0,real=false;
 function level(t){
@@ -139,7 +141,7 @@ function puppet(id,pos,t){
 }
 function seg(t){
   const c=S.chyron;if(!c||!c.segments)return null;
-  const el=(t-S.t0)/1000;let i=-1;
+  const m=mediaNow(),el=m!=null&&S.mstart!=null?m-S.mstart:(t-S.t0)/1000;let i=-1;
   c.segments.forEach((q,k)=>{if(q.at_s<=el)i=k});
   if(i!==S.seg){S.seg=i;S.chAt=t}                    // titular nuevo: el faldón vuelve a entrar
   return c.segments[i]||null;
@@ -170,6 +172,7 @@ function chyron(t){
 function frame(t){
   requestAnimationFrame(frame);
   lv=level(t);
+  const mn=mediaNow();while(pending.length&&mn!=null&&mn>=pending[0].media_s)fire(pending.shift());   // eventos exactos por reloj de audio
   const sc=SCENES[S.scene],gr=g.createLinearGradient(0,0,0,H);
   gr.addColorStop(0,sc.sky[0]);gr.addColorStop(1,sc.sky[1]);
   g.fillStyle=gr;g.fillRect(0,0,W,H);
@@ -194,21 +197,34 @@ $('bd').onclick=()=>{
 };
 
 // ===== Fuente 2: radio real. Consulta /status (now_playing: null = música) =====
+// Sincronizacion exacta: /status publica "timeline" (cada inicio de item con su instante en el reloj del stream).
+// Cada evento se dispara cuando el audio del oyente llega a ese instante: sin retrasos estimados.
+const seenTl=new Set(),pending=[];
+const fire=e=>{if(['news','spot','music'].includes(e.kind))RR.emit({tipo:e.kind,titulo:e.title,chyron:e.chyron,mstart:e.media_s,elapsed:Math.max(0,(mediaNow()??e.media_s)-e.media_s)},true)};
+function syncTimeline(tl){
+  const m=mediaNow();let now=null;
+  for(const e of tl){
+    const k=e.media_s+'|'+(e.id||e.title);if(seenTl.has(k))continue;seenTl.add(k);
+    if(e.media_s<=m)now=e;else pending.push(e);      // ya esta sonando / todavia no
+  }
+  if(now)fire(now);
+}
 let poll=null,last='';
 $('dl').oninput=e=>{RR.delay=+e.target.value||0};
 $('bc').onclick=()=>{
-  clearInterval(poll);
+  clearInterval(poll);seenTl.clear();pending.length=0;last='';
   const base=$('u').value.trim().replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/(listen)?\/?$/,'');
   if(!base){$('st').textContent='Sin conexión';return}
   const tick=async()=>{
     try{
       const j=await(await fetch(base+'/status')).json(),np=j.now_playing;
       const key=np?np.kind+':'+(np.id||np.title):'music';
-      if(key!==last){last=key;RR.emit(np?{tipo:np.kind,titulo:np.title,chyron:np.chyron,elapsed:np.elapsed_s}:{tipo:'music',titulo:'Música de la radio'})}
-      $('st').textContent='Conectado, fuente: '+j.source+', oyentes: '+j.listeners+(RR.lag!=null?', desfase auto: '+RR.lag.toFixed(1)+' s':'');
+      if(j.timeline&&mediaNow()!=null)syncTimeline(j.timeline);
+      else if(key!==last){last=key;pending.length=0;RR.emit(np?{tipo:np.kind,titulo:np.title,chyron:np.chyron,elapsed:np.elapsed_s}:{tipo:'music',titulo:'Música de la radio'})}   // sin reloj de audio: estimación de desfase
+      $('st').textContent='Conectado, fuente: '+j.source+', oyentes: '+j.listeners+(mediaNow()!=null?', sync exacta con el reloj del audio':RR.lag!=null?', desfase auto: '+RR.lag.toFixed(1)+' s':', sin reloj de audio');
     }catch(_){$('st').textContent='No se pudo leer /status (revisá CORS y que sea https)'}
   };
-  tick();poll=setInterval(tick,1500);
+  tick();poll=setInterval(tick,600);
 };
 
 // ===== Fuente 3: teclado manual =====
