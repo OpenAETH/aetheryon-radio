@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rocket Radio · prototipo</title>
+<style>
+:root{--bg:#1a1030;--fg:#fff3e0;--mut:#b9a6d6;--ac:#ffb347;--pn:#2a1a4a}
+@media(prefers-color-scheme:light){:root{--bg:#fff3e0;--fg:#2a1a4a;--mut:#6b5a8a;--pn:#ffe2b8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px}
+canvas{width:min(100%,854px);aspect-ratio:854/480;border-radius:14px;background:#000}
+.p{width:min(100%,854px);background:var(--pn);border-radius:14px;padding:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,input{font:inherit;padding:7px 11px;border-radius:8px;border:1px solid var(--mut);background:transparent;color:var(--fg)}
+button{cursor:pointer}button:hover,button:focus-visible{border-color:var(--ac);outline:none}
+#u{flex:1;min-width:200px}
+#dl{width:70px}
+#st,#help{color:var(--mut);font-size:12px}
+#log{width:100%;max-height:84px;overflow:auto;color:var(--mut);font:12px ui-monospace,monospace}
+</style>
+</head>
+<body>
+<canvas id="c" width="854" height="480" aria-label="Escena animada de Rocket Radio"></canvas>
+<div class="p">
+  <button id="bd">Iniciar demo</button>
+  <input id="u" placeholder="URL de la radio, por ejemplo https://tu-radio.onrender.com">
+  <button id="bc">Conectar a la radio</button>
+  <label>Ajuste extra (s) <input id="dl" type="number" value="0" min="-10" max="30" step="0.5"></label>
+  <span id="st">Sin conexión</span>
+  <div id="log"></div>
+  <div id="help">Teclas: 1 y 2 cambian de escena, M música, N noticia, S spot, O y T emociones.</div>
+</div>
+<script>
+// ===== Datos: escenas y personajes (esto es lo que luego puede venir de un JSON) =====
+const SCENES={
+ bar:{sky:['#1b1040','#3b1a5e'],floor:'#241338',
+  props:[{t:'rect',x:0,y:330,w:854,h:20,c:'#ff5d8f'},{t:'rect',x:560,y:250,w:240,h:80,c:'#3a2a5c'},
+         {t:'text',x:427,y:80,s:'BAR GALÁCTICO',c:'#5ef2ff',f:'bold 42px system-ui'}],
+  chars:{cap:{x:250,y:300},nova:{x:430,y:300}}},
+ cabina:{sky:['#0f2a3d','#16475f'],floor:'#0b1c28',
+  props:[{t:'rect',x:60,y:50,w:160,h:46,c:'#ff2d55'},{t:'rect',x:150,y:330,w:560,h:24,c:'#2d6a8a'},
+         {t:'text',x:140,y:83,s:'AL AIRE',c:'#fff',f:'bold 26px system-ui'}],
+  chars:{cap:{x:300,y:300},nova:{x:520,y:300}}}
+};
+const CHARS={cap:{body:'#ffb347',head:'#ffd9a0',name:'Cap'},nova:{body:'#5ef2ff',head:'#c8f7ff',name:'Nova'}};
+// Estados de personaje: rebote, velocidad, apertura de boca, ojos, temblor
+const STATES={
+ idle:{bob:3,spd:1.5,mouth:0},talk:{bob:5,spd:3,mouth:1},dance:{bob:16,spd:5,mouth:.3},
+ oh:{bob:2,spd:1,mouth:.9,eyes:1.6},tos:{bob:2,spd:2,shake:6,mouth:.4}
+};
+
+// ===== Estado y API pública =====
+const RR=window.RocketRadio={analyser:null,delay:0,lag:null};
+const S={chyron:null,chAt:0,scene:'bar',title:'Esperando señal…',who:{cap:{st:'idle',until:0},nova:{st:'idle',until:0}}};
+const $=id=>document.getElementById(id);
+const log=t=>{const l=$('log');l.insertAdjacentHTML('afterbegin','<div>'+t+'</div>');while(l.children.length>30)l.lastChild.remove()};
+
+// ===== Director: reglas evento → escena y estados =====
+const setScene=n=>{if(SCENES[n])S.scene=n};
+const setState=(c,st,ms)=>{const w=S.who[c];w.st=st;w.until=ms?performance.now()+ms:0};
+const allState=st=>{for(const c in S.who)setState(c,st)};
+let talkTimer=null,turn=0;
+function stopTalk(){clearTimeout(talkTimer)}
+function startTalk(){
+  stopTalk();
+  const go=()=>{
+    allState('idle');
+    const a=['cap','nova'][turn++%2],b=['cap','nova'][turn%2];
+    setState(a,'talk');
+    if(Math.random()<.35)setState(b,Math.random()<.5?'oh':'tos',1200);
+    talkTimer=setTimeout(go,3500+Math.random()*2500);
+  };
+  go();
+}
+const RULES={
+ music(e){stopTalk();setScene('bar');allState('dance');S.chyron=null;S.title='Música: '+(e.titulo||'en la radio')},
+ news(e){setScene('cabina');S.chyron={tag:'Noticia',headline:e.titulo,...e.chyron};S.chAt=performance.now();S.title='Noticia: '+(e.titulo||'');startTalk()},
+ spot(e){setScene('bar');S.chyron={tag:'Spot',headline:e.titulo,...e.chyron};S.chAt=performance.now();S.title='Spot: '+(e.titulo||'');startTalk()}
+};
+// Punto de entrada único: la radio, el demo o tu backend llaman a RocketRadio.emit(...)
+RR.emit=(e,now)=>setTimeout(()=>{
+  log(JSON.stringify(e));
+  (RULES[e.tipo]||(()=>{}))(e);
+  if(e.escena)setScene(e.escena);
+  if(e.emocion)setState(e.quien||'cap',e.emocion,1500);
+},now?0:Math.max(0,((RR.lag!=null&&performance.now()-ext.t<3000?RR.lag:3)+RR.delay)*1000));
+
+// ===== Nivel de voz para la boca =====
+// Prioridad: 1) nivel real enviado por la pagina de escucha de la radio (BroadcastChannel),
+// 2) un analizador propio en RocketRadio.analyser, 3) nivel simulado.
+let ext={v:0,t:0};
+if(typeof BroadcastChannel!=='undefined'){
+  new BroadcastChannel('rocket-radio').onmessage=m=>{ext={v:m.data.level||0,t:performance.now()};if(typeof m.data.lag==='number')RR.lag=RR.lag==null?m.data.lag:RR.lag*.9+m.data.lag*.1};
+}
+const buf=new Uint8Array(256);let lv=0,real=false;
+function level(t){
+  let target;
+  real=true;
+  if(t-ext.t<500)target=ext.v;
+  else if(RR.analyser){RR.analyser.getByteTimeDomainData(buf);let s=0;for(const v of buf)s+=Math.abs(v-128);target=Math.min(1,s/buf.length/30)}
+  else{real=false;target=.5+.5*Math.sin(t/90)*Math.sin(t/230+1)}
+  return Math.max(target,lv*.75); // ataque rapido, cierre suave
+}
+
+// ===== Render (aquí se reemplazaría el dibujo por sprites de un atlas) =====
+const cv=$('c'),g=cv.getContext('2d'),W=854,H=480;
+function puppet(id,pos,t){
+  const w=S.who[id],st=STATES[w.st],c=CHARS[id];
+  if(w.until&&t>w.until){w.st='idle';w.until=0}
+  const ph=t/1000*st.spd*2+(id==='nova'?1:0);
+  const y=pos.y-Math.abs(Math.sin(ph))*st.bob;
+  const x=pos.x+(st.shake?Math.sin(t/30)*st.shake:0);
+  g.fillStyle=c.body;g.fillRect(x-35,y-90,70,90);
+  g.fillStyle=c.head;g.beginPath();g.arc(x,y-120,38,0,7);g.fill();
+  g.strokeStyle=c.body;g.lineWidth=4;g.beginPath();g.moveTo(x,y-158);g.lineTo(x+10,y-182+Math.sin(ph*2)*4);g.stroke();
+  const blink=(t%3000)<120?.1:1,e=st.eyes||1;
+  g.fillStyle='#1a1030';
+  for(const dx of[-14,14]){g.beginPath();g.ellipse(x+dx,y-128,5*e,6*e*blink,0,0,7);g.fill()}
+  const m=w.st==='talk'?lv:st.mouth*(w.st==='dance'?.5+.5*Math.sin(ph):1);
+  g.beginPath();g.ellipse(x,y-106,9+m*3,2+m*10,0,0,7);g.fill();
+  g.fillStyle='#fff';g.font='12px system-ui';g.textAlign='center';g.fillText(c.name,x,pos.y+18);
+}
+// ===== Faldón (chyron): el contenido llega por la API en now_playing.chyron =====
+function fit(s,w,px,wt){
+  while(px>14){g.font=wt+px+'px system-ui';if(g.measureText(s).width<=w)return s;px-=2}
+  g.font=wt+'14px system-ui';
+  while(s.length>3&&g.measureText(s+'…').width>w)s=s.slice(0,-1);
+  return s+'…';
+}
+function chyron(t){
+  const c=S.chyron;g.textAlign='left';
+  if(!c){g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,430,W,50);g.fillStyle='#fff';g.font='bold 20px system-ui';g.fillText(S.title+(real?'   (voz real)':''),20,462);return}
+  const k=Math.min(1,(t-S.chAt)/450);
+  g.save();g.translate((Math.pow(1-k,3)*-1)*W,0);      // entra deslizando desde la izquierda
+  g.font='bold 14px system-ui';const tag=(c.tag||'').toUpperCase(),tw=g.measureText(tag).width+28;
+  g.fillStyle='#e11d48';g.fillRect(30,344,tw,26);g.fillStyle='#fff';g.fillText(tag,44,362);
+  g.fillStyle='rgba(12,10,32,.92)';g.fillRect(30,370,794,48);
+  g.fillStyle='#fff';g.fillText(fit(c.headline||'',760,26,'bold '),46,404);
+  if(c.deck){g.fillStyle='rgba(42,26,74,.92)';g.fillRect(30,418,794,26);g.fillStyle='#ffd9a0';g.fillText(fit(c.deck,760,16,''),46,436)}
+  g.fillStyle='#ffb347';g.fillRect(0,448,W,32);
+  g.save();g.beginPath();g.rect(0,448,W,32);g.clip();
+  g.fillStyle='#1a1030';g.font='bold 16px system-ui';
+  const tk=c.ticker||c.source||S.title,wd=g.measureText(tk).width;
+  g.fillText(tk,W-((t-S.chAt)/18)%(W+wd),470);g.restore();g.restore();
+}
+function frame(t){
+  requestAnimationFrame(frame);
+  lv=level(t);
+  const sc=SCENES[S.scene],gr=g.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,sc.sky[0]);gr.addColorStop(1,sc.sky[1]);
+  g.fillStyle=gr;g.fillRect(0,0,W,H);
+  g.fillStyle=sc.floor;g.fillRect(0,300,W,180);
+  for(const p of sc.props){
+    g.fillStyle=p.c;
+    if(p.t==='rect')g.fillRect(p.x,p.y,p.w,p.h);
+    else{g.font=p.f;g.textAlign='center';g.fillText(p.s,p.x,p.y)}
+  }
+  for(const id in sc.chars)puppet(id,sc.chars[id],t);
+  chyron(t);
+}
+requestAnimationFrame(frame);
+
+// ===== Fuente 1: demo =====
+let demo=null;
+$('bd').onclick=()=>{
+  if(demo){clearInterval(demo);demo=null;$('bd').textContent='Iniciar demo';return}
+  const seq=[{tipo:'music',titulo:'Loop de ejemplo'},{tipo:'news',titulo:'La nave sigue estacionada en el bar',chyron:{tag:'Último momento',headline:'La nave sigue estacionada frente al Bar Galáctico',deck:'Vecinos reportan luces de neón y música hasta la madrugada',ticker:'Clima despejado en toda la galaxia   •   Mercado de cometas en alza   •   Reabre la estación Nova',source:'Rocket Radio'}},{tipo:'spot',titulo:'Auspicia el Bar Galáctico'}];
+  let i=0;const next=()=>RR.emit(seq[i++%3],true);
+  next();demo=setInterval(next,12000);$('bd').textContent='Detener demo';
+};
+
+// ===== Fuente 2: radio real. Consulta /status (now_playing: null = música) =====
+let poll=null,last='';
+$('dl').oninput=e=>{RR.delay=+e.target.value||0};
+$('bc').onclick=()=>{
+  clearInterval(poll);
+  const base=$('u').value.trim().replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/(listen)?\/?$/,'');
+  if(!base){$('st').textContent='Sin conexión';return}
+  const tick=async()=>{
+    try{
+      const j=await(await fetch(base+'/status')).json(),np=j.now_playing;
+      const key=np?np.kind+':'+(np.id||np.title):'music';
+      if(key!==last){last=key;RR.emit(np?{tipo:np.kind,titulo:np.title,chyron:np.chyron}:{tipo:'music',titulo:'Música de la radio'})}
+      $('st').textContent='Conectado, fuente: '+j.source+', oyentes: '+j.listeners+(RR.lag!=null?', desfase auto: '+RR.lag.toFixed(1)+' s':'');
+    }catch(_){$('st').textContent='No se pudo leer /status (revisá CORS y que sea https)'}
+  };
+  tick();poll=setInterval(tick,1500);
+};
+
+// ===== Fuente 3: teclado manual =====
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  const k=e.key.toLowerCase();
+  const m={'1':()=>setScene('bar'),'2':()=>setScene('cabina'),
+    m:()=>RR.emit({tipo:'music'},1),n:()=>RR.emit({tipo:'news',titulo:'Noticia manual'},1),
+    s:()=>RR.emit({tipo:'spot',titulo:'Spot manual'},1),
+    o:()=>setState('cap','oh',1200),t:()=>setState('nova','tos',1200)};
+  (m[k]||(()=>{}))();
+});
+</script>
+</body>
+</html>

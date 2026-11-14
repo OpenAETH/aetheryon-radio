@@ -401,7 +401,12 @@ setInterval(function() {
   rrAnalyser.getByteTimeDomainData(rrBuf);
   var sum = 0;
   for (var i = 0; i < rrBuf.length; i++) { var v = (rrBuf[i] - 128) / 128; sum += v * v; }
-  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5) });
+  // desfase real: cuanto audio ya recibido falta por sonar (el servidor cambia de item antes de que lo oigas)
+  var lag = 0;
+  if (audioEl && audioEl.buffered && audioEl.buffered.length) {
+    lag = audioEl.buffered.end(audioEl.buffered.length - 1) - audioEl.currentTime;
+  }
+  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5), lag: lag > 0 ? lag : 0 });
 }, 40);
 
 function teardownAudio() {

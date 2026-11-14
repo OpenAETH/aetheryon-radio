@@ -260,6 +260,8 @@ class PlayoutEngine:
                 await enc.stdin.drain()
             elif kind == "start":
                 self.now_playing = {"kind": meta["kind"], "title": meta["title"], "id": meta.get("id")}
+                if meta.get("chyron"):
+                    self.now_playing["chyron"] = meta["chyron"]
                 if meta.get("id"):
                     self.store.mark_playing(meta["id"])
             elif kind == "end":
@@ -307,13 +309,13 @@ class PlayoutEngine:
         self._current_news = item["id"]
         self._skip_id = None
         await self._play_file(buf, path, kind=item["kind"], title=item["title"] or item["external_id"],
-                              item_id=item["id"])
+                              item_id=item["id"], chyron=(item.get("metadata") or {}).get("chyron"))
 
     async def _play_file(self, buf: PCMQueue, path: Path, *, kind: str, title: str,
-                         item_id: Optional[str] = None) -> bool:
+                         item_id: Optional[str] = None, chyron: Optional[dict] = None) -> bool:
         """Decodifica `path` hacia la cola. Devuelve True si se reprodujo completo."""
         news = item_id is not None
-        meta = {"kind": kind, "title": title, "id": item_id}
+        meta = {"kind": kind, "title": title, "id": item_id, "chyron": chyron}
         proc = await self.spawn(*self._decoder_cmd(path, news), stdout=asyncio.subprocess.PIPE,
                                 stderr=asyncio.subprocess.PIPE)
         outcome, error, produced, fade_in_left = "played", "", 0, int(FADE_IN_S * BYTES_PER_SECOND)

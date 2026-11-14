@@ -27,6 +27,16 @@ from fastapi.responses import JSONResponse
 
 from playlist import KINDS, PRIORITIES, PLAYING, QUEUED, PlaylistStore, PolicyError, QueueFull
 
+CHYRON_LIMITS = {"headline": 120, "deck": 200, "tag": 30, "ticker": 240, "source": 60}
+
+
+def clean_chyron(raw) -> Optional[dict]:
+    """Faldón/chyron de una noticia: solo textos cortos conocidos (los muestra la animación)."""
+    if not isinstance(raw, dict):
+        return None
+    out = {k: str(raw[k]).strip()[:n] for k, n in CHYRON_LIMITS.items() if raw.get(k)}
+    return out or None
+
 logger = logging.getLogger("aetheryon-radio.playlist-api")
 
 EXT_BY_FORMAT = (("mp3", "mp3"), ("wav", "wav"), ("ogg", "ogg"), ("flac", "flac"), ("matroska", "webm"),
@@ -152,6 +162,8 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
                     raise ValueError
             except ValueError:
                 raise HTTPException(422, "X-Metadata debe ser un objeto JSON de hasta 2 KB")
+            if "chyron" in metadata:
+                metadata["chyron"] = clean_chyron(metadata["chyron"])
         claimed = request.headers.get("x-content-sha256", "").strip().lower()
         existing = store.by_external(external_id)
         if existing is not None and claimed and existing.get("sha256") == claimed:
@@ -256,6 +268,7 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
         return await ingest(external_id, tmp, sha=hashlib.sha256(data).hexdigest(), size=len(data),
                             title=str(body.get("title") or external_id)[:200], kind=body.get("kind", "news"),
                             priority=body.get("priority", "normal"), source=f"tts:{engine}",
-                            ttl_s=cfg.default_ttl_s, metadata={"text_chars": len(text), "voice": voice})
+                            ttl_s=cfg.default_ttl_s, metadata={"text_chars": len(text), "voice": voice,
+                                      "chyron": clean_chyron(body.get("chyron"))})
 
     return router
