@@ -38,11 +38,19 @@ def clean_chyron(raw) -> Optional[dict]:
     return out or None
 
 
-def layout_segments(raw, duration_s: float) -> list:
+def layout_segments(raw, duration_s: float, est_s=None) -> list:
     """Titulares de una edición con su momento en el audio: [{headline, deck, tag, at_s}].
-    Cada segmento puede traer `at_s` (segundos) o un peso `w` / `text` para repartir la duración en proporción."""
+    Cada segmento puede traer `at_s` (segundos) o un peso `w` / `text` para repartir la duración en proporción.
+    Si el productor estimó la duración total (`est_s`, p. ej. bytes/bitrate), sus `at_s` se reescalan a la duración real
+    del audio: así la deriva de una estimación no se acumula hacia el final de la edición."""
     if not isinstance(raw, list):
         return []
+    try:
+        ratio = duration_s / float(est_s)
+    except (TypeError, ValueError, ZeroDivisionError):
+        ratio = 1.0
+    if not 0.5 < ratio < 2.0:
+        ratio = 1.0
     items = []
     for r in raw[:12]:
         if not isinstance(r, dict) or not r.get("headline"):
@@ -53,7 +61,7 @@ def layout_segments(raw, duration_s: float) -> list:
         except (TypeError, ValueError):
             w = 1.0
         at = r.get("at_s")
-        items.append((seg, w, float(at) if isinstance(at, (int, float)) else None))
+        items.append((seg, w, float(at) * ratio if isinstance(at, (int, float)) else None))
     total, acc, out = sum(w for _, w, _ in items) or 1.0, 0.0, []
     for seg, w, at in items:
         seg["at_s"] = round(min(max(at if at is not None else duration_s * acc / total, 0.0), duration_s), 1)
@@ -138,7 +146,7 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
             if duration > cfg.max_duration_s:
                 raise HTTPException(413, f"audio demasiado largo (máx {int(cfg.max_duration_s)} s)")
             if metadata.get("segments"):
-                metadata["segments"] = layout_segments(metadata["segments"], duration)
+                metadata["segments"] = layout_segments(metadata["segments"], duration, metadata.get("duration_s"))
             names = str(fmt.get("format_name", ""))
             ext = next((e for key, e in EXT_BY_FORMAT if key in names), None)
             if ext is None:

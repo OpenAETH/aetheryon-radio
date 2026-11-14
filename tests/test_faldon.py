@@ -14,3 +14,10 @@ def test_layout_descarta_basura_y_limita_textos():
 
 def test_clean_chyron():
     assert clean_chyron({"headline": "x", "otro": 1}) == {"headline": "x"} and clean_chyron([1]) is None
+
+
+def test_layout_reescala_at_s_a_la_duracion_real():
+    segs = layout_segments([{"headline": "A", "at_s": 0}, {"headline": "B", "at_s": 10}], 22, 20)   # estimó 20 s, el audio dura 22
+    assert [s["at_s"] for s in segs] == [0.0, 11.0]
+    assert layout_segments([{"headline": "A", "at_s": 10}], 30, "basura")[0]["at_s"] == 10.0       # estimación inválida: se ignora
+    assert layout_segments([{"headline": "A", "at_s": 10}], 30, 3)[0]["at_s"] == 10.0              # razón absurda (>2x): se ignora
