@@ -141,6 +141,7 @@ canvas {
   touch-action: manipulation;
 }
 .btn-mini:hover { border-color:var(--cyan); color:var(--cyan); }
+.btn-mini.active { border-color:var(--amber); color:var(--amber); }
 .source-label { font-size:9px; letter-spacing:2px; color:var(--muted); margin-top:18px; text-transform:uppercase; }
 .source-label b { color:var(--cyan); font-weight:700; }
 .btn-listen.attention { animation:attn 1.2s ease-in-out infinite; }
@@ -165,6 +166,7 @@ canvas {
     <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
     <span class="vol-label" id="vol-pct">80%</span>
   </div>
+  <button class="btn-mini hidden" id="btn-wake" style="width:100%;margin:-8px 0 14px">PANTALLA ENCENDIDA: NO</button>
   <div class="tap-hint hidden" id="tap-hint">El navegador bloqueó el audio automático: tocá para escuchar</div>
   <div class="source-label" id="source-label">FUENTE: <b>AETHERYON RADIO</b> (LISTENER LOOP)</div>
   <div class="server-row">
@@ -259,6 +261,14 @@ var currentSession = null;
 var retryTimer  = null;
 var retryCount  = 0;
 
+// Segundo plano (pantalla apagada): en moviles el audio va DIRECTO del <audio> al sistema (sin WebAudio).
+// WebAudio se suspende al bloquear la pantalla y se lleva el sonido; con el <audio> solo, Android/iOS lo mantienen
+// y muestran los controles de bloqueo (Media Session). En escritorio se conserva WebAudio (visualizador, volumen).
+// Forzar: ?webaudio=1 (con WebAudio) o ?webaudio=0 (sin WebAudio).
+var IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.platform));
+var USE_WEBAUDIO = /[?&]webaudio=1/.test(location.search) || (!IS_MOBILE && !/[?&]webaudio=0/.test(location.search));
+
 // Canvas
 var canvas = document.getElementById('viz');
 var ctx2d  = canvas.getContext('2d');
@@ -342,19 +352,21 @@ function appendNext() {
 function initAudio() {
   teardownAudio();
 
-  // MOBILE FIX 1: AudioContext creado dentro del click handler
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  // MOBILE FIX 2: resume() explícito — Chrome mobile suspende por defecto
-  audioCtx.resume();
+  if (USE_WEBAUDIO) {
+    // MOBILE FIX 1: AudioContext creado dentro del click handler
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // MOBILE FIX 2: resume() explícito — Chrome mobile suspende por defecto
+    audioCtx.resume();
 
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 256;
-  gainNode = audioCtx.createGain();
-  gainNode.gain.value = parseFloat(document.getElementById('vol').value);
-  gainNode.connect(analyser);
-  analyser.connect(audioCtx.destination);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = parseFloat(document.getElementById('vol').value);
+    gainNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+  }
 
   // MOBILE FIX 3: <audio> EN EL DOM
   // off-DOM → mediaSource.sourceopen nunca dispara en Chrome/Safari mobile
@@ -364,13 +376,17 @@ function initAudio() {
   audioEl.muted = userMuted;
   document.body.appendChild(audioEl);
 
-  var mediaSrc = audioCtx.createMediaElementSource(audioEl);
-  mediaSrc.connect(gainNode);
+  if (USE_WEBAUDIO) {
+    var mediaSrc = audioCtx.createMediaElementSource(audioEl);
+    mediaSrc.connect(gainNode);
 
-  // Rocket Radio: analizador tomado ANTES del volumen, para animar la boca con la voz real
-  rrAnalyser = audioCtx.createAnalyser();
-  rrAnalyser.fftSize = 256;
-  mediaSrc.connect(rrAnalyser);
+    // Rocket Radio: analizador tomado ANTES del volumen, para animar la boca con la voz real
+    rrAnalyser = audioCtx.createAnalyser();
+    rrAnalyser.fftSize = 256;
+    mediaSrc.connect(rrAnalyser);
+  } else {
+    audioEl.volume = parseFloat(document.getElementById('vol').value);   // iOS ignora volume: usa los botones del equipo
+  }
 
   mediaSource = new MediaSource();
   audioEl.src = URL.createObjectURL(mediaSource);
@@ -397,16 +413,23 @@ function initAudio() {
 var rrChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('rocket-radio') : null;
 var rrBuf = new Uint8Array(256);
 setInterval(function() {
-  if (!rrChannel || !rrAnalyser) return;
-  rrAnalyser.getByteTimeDomainData(rrBuf);
+  if (!rrChannel || (!rrAnalyser && !audioEl)) return;
   var sum = 0;
-  for (var i = 0; i < rrBuf.length; i++) { var v = (rrBuf[i] - 128) / 128; sum += v * v; }
+  if (rrAnalyser) {          // sin WebAudio (moviles) no hay nivel de voz, pero pos/lag siguen sincronizando titulares
+    rrAnalyser.getByteTimeDomainData(rrBuf);
+    for (var i = 0; i < rrBuf.length; i++) { var v = (rrBuf[i] - 128) / 128; sum += v * v; }
+  }
   // desfase real: cuanto audio ya recibido falta por sonar (el servidor cambia de item antes de que lo oigas)
   var lag = 0;
   if (audioEl && audioEl.buffered && audioEl.buffered.length) {
     lag = audioEl.buffered.end(audioEl.buffered.length - 1) - audioEl.currentTime;
   }
-  rrChannel.postMessage({ level: Math.min(1, Math.sqrt(sum / rrBuf.length) * 5), lag: lag > 0 ? lag : 0,
+  var lvl = Math.min(1, Math.sqrt(sum / rrBuf.length) * 5);
+  if (!rrAnalyser) {         // sin WebAudio: animacion sintetica de la boca mientras suena (misma que usa Rocket Radio sin datos)
+    var tn = Date.now();
+    lvl = (audioEl && !audioEl.paused && !audioEl.muted) ? 0.5 + 0.5 * Math.sin(tn / 90) * Math.sin(tn / 230 + 1) : 0;
+  }
+  rrChannel.postMessage({ level: lvl, lag: lag > 0 ? lag : 0,
                          pos: audioEl ? audioEl.currentTime : 0, playing: !!(audioEl && !audioEl.paused) });
 }, 40);
 
@@ -440,6 +463,7 @@ function setListening(on) {
   btn.textContent = on ? '\u23F8 SILENCIAR' : '\u25B6 ESCUCHAR';
   btn.classList.toggle('active', on);
   if (audioEl) audioEl.muted = !on;
+  if (typeof updateMediaState === 'function') updateMediaState();
 }
 
 function showTapHint(show) {
@@ -453,7 +477,8 @@ function tryPlay() {
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
   audioEl.play().catch(function() {});
   setTimeout(function() {
-    var blocked = !audioEl || audioEl.paused || !audioCtx || audioCtx.state !== 'running';
+    var ctxOk = !USE_WEBAUDIO || (audioCtx && audioCtx.state === 'running');
+    var blocked = !audioEl || audioEl.paused || !ctxOk;
     showTapHint(blocked && !audioEnabled && !userMuted);
     if (!blocked && !userMuted) setListening(true);   // autoplay permitido: ya esta sonando
   }, 400);
@@ -566,8 +591,97 @@ document.getElementById('btn-dj-clear').addEventListener('click', function() { s
 renderSource();
 connect();
 
+// ---------- Segundo plano: controles de bloqueo, recuperacion y pantalla encendida ----------
+var nowTitle = '';
+function updateMediaState() {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    navigator.mediaSession.playbackState = (audioEnabled && !userMuted) ? 'playing' : 'paused';
+    if (typeof MediaMetadata !== 'undefined') {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: nowTitle || 'En vivo', artist: 'AETHERYON RADIO', album: 'Listener Loop' });
+    }
+  } catch (_) {}
+}
+function mediaPlay() {
+  userMuted = false;
+  setListening(true);
+  showTapHint(false);
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
+  if (audioEl) audioEl.play().catch(function() {});
+}
+function mediaMute() { userMuted = true; setListening(false); }   // radio en vivo: silenciar, no pausar (evita desfase)
+if ('mediaSession' in navigator) {
+  try {
+    navigator.mediaSession.setActionHandler('play', mediaPlay);
+    navigator.mediaSession.setActionHandler('pause', mediaMute);
+    navigator.mediaSession.setActionHandler('stop', mediaMute);
+  } catch (_) {}
+  updateMediaState();
+}
+
+// Titulo en pantalla de bloqueo: lo que suena segun /status (solo con la radio propia).
+function pollNowPlaying() {
+  if (djUrl) { if (nowTitle) { nowTitle = ''; updateMediaState(); } return; }
+  fetch('/status', { cache: 'no-store' }).then(function(r) { return r.json(); }).then(function(st) {
+    var t = (st && st.now_playing && st.now_playing.title) || '';
+    if (t !== nowTitle) { nowTitle = t; updateMediaState(); }
+  }).catch(function() {});
+}
+setInterval(pollNowPlaying, 20000);
+pollNowPlaying();
+
+// El sistema puede pausar el <audio> (bloqueo, llamada, otra app): si el oyente no pidio silencio, se reanuda
+// y se salta al borde en vivo (lo acumulado mientras estuvo pausado ya no es "en vivo").
+function resumeLive() {
+  if (!audioEl || userMuted || !audioEnabled) return;
+  try {
+    if (audioEl.buffered.length) {
+      var end = audioEl.buffered.end(audioEl.buffered.length - 1);
+      if (end - audioEl.currentTime > 8) audioEl.currentTime = Math.max(audioEl.buffered.start(0), end - 1);
+    }
+  } catch (_) {}
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(function() {});
+  audioEl.play().catch(function() {});
+}
+setInterval(function() {      // vigilante: el audio deberia estar sonando
+  if (audioEl && audioEnabled && !userMuted && audioEl.paused && sbReady) resumeLive();
+}, 3000);
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState !== 'visible') return;
+  if (!ws || ws.readyState > 1) { retryCount = 0; connect(); }   // el socket murio en segundo plano
+  resumeLive();
+  if (wakeWanted) requestWake();
+});
+
+// Pantalla encendida (opcional): evita que el telefono se bloquee mientras escuchas.
+var wakeLock = null, wakeWanted = false;
+function requestWake() {
+  if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+  navigator.wakeLock.request('screen').then(function(l) {
+    wakeLock = l;
+    l.addEventListener('release', function() { if (wakeLock === l) wakeLock = null; });
+  }).catch(function() {});
+}
+(function() {
+  var btn = document.getElementById('btn-wake');
+  if (!('wakeLock' in navigator) || !IS_MOBILE) return;   // en escritorio no hace falta
+  btn.classList.remove('hidden');
+  try { wakeWanted = localStorage.getItem('aetheryon_wake') === '1'; } catch (_) {}
+  function paint() { btn.textContent = 'PANTALLA ENCENDIDA: ' + (wakeWanted ? 'SI' : 'NO'); btn.classList.toggle('active', wakeWanted); }
+  paint();
+  btn.addEventListener('click', function() {
+    wakeWanted = !wakeWanted;
+    try { localStorage.setItem('aetheryon_wake', wakeWanted ? '1' : '0'); } catch (_) {}
+    if (wakeWanted) requestWake(); else if (wakeLock) { wakeLock.release().catch(function() {}); wakeLock = null; }
+    paint();
+  });
+  if (wakeWanted) document.addEventListener('click', function once() { requestWake(); document.removeEventListener('click', once); });
+})();
+
 document.getElementById('vol').addEventListener('input', function() {
   if (gainNode) gainNode.gain.value = this.value;
+  else if (audioEl) audioEl.volume = parseFloat(this.value);
   document.getElementById('vol-pct').textContent = Math.round(this.value * 100) + '%';
 });
 </script>
