@@ -272,28 +272,65 @@ var USE_WEBAUDIO = /[?&]webaudio=1/.test(location.search) || (!IS_MOBILE && !/[?
 // Canvas
 var canvas = document.getElementById('viz');
 var ctx2d  = canvas.getContext('2d');
-canvas.width  = canvas.offsetWidth || 340;
-canvas.height = 80;
+var vizW = 0, vizH = 0, vizGrad = null;
+function sizeViz() {
+  // Tamano real en pixeles de dispositivo; se recalcula al rotar/redimensionar (antes se fijaba una sola vez)
+  var dpr = Math.min(window.devicePixelRatio || 1, 3);
+  var w = Math.max(canvas.clientWidth || canvas.parentNode.clientWidth || 340, 1);
+  var h = canvas.clientHeight || 80;
+  if (w * dpr === vizW && h * dpr === vizH) return;
+  vizW = canvas.width = Math.round(w * dpr);
+  vizH = canvas.height = Math.round(h * dpr);
+  vizGrad = ctx2d.createLinearGradient(0, vizH, 0, 0);   // gradiente solido, sin depender de hsl()/alfa por barra
+  vizGrad.addColorStop(0, '#00a6a0');
+  vizGrad.addColorStop(0.6, '#00ffd0');
+  vizGrad.addColorStop(1, '#7dffee');
+}
+sizeViz();
+window.addEventListener('resize', sizeViz);
+window.addEventListener('orientationchange', sizeViz);
 
-function drawViz() {
+// Barras sobre todo el ancho, escala logaritmica de frecuencias (la voz vive en las primeras bandas).
+// Sin analizador (movil), contexto suspendido o pestana silenciada, cae a una animacion sintetica mientras suena
+// y a una linea base tenue en reposo: el visualizador nunca queda en blanco.
+var VIZ_BARS = 48, vizBuf = null, vizSmooth = new Array(VIZ_BARS);
+for (var vi = 0; vi < VIZ_BARS; vi++) vizSmooth[vi] = 0;
+
+function drawViz(now) {
   requestAnimationFrame(drawViz);
-  if (!analyser) {
-    ctx2d.fillStyle = '#04040a';
-    ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-    return;
+  sizeViz();
+  var W = vizW, H = vizH, i, v, data = null, energy = 0;
+  if (analyser) {
+    if (!vizBuf || vizBuf.length !== analyser.frequencyBinCount) vizBuf = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(vizBuf);
+    for (i = 0; i < vizBuf.length; i++) energy += vizBuf[i];
+    if (energy > 0) data = vizBuf;
   }
-  var d = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(d);
-  ctx2d.fillStyle = 'rgba(4,4,10,0.4)';
-  ctx2d.fillRect(0, 0, canvas.width, canvas.height);
-  var bw = canvas.width / d.length * 2.5;
-  for (var i = 0; i < d.length; i++) {
-    var h = (d[i] / 255) * canvas.height;
-    ctx2d.fillStyle = 'hsl(' + (170 + i / d.length * 30) + ',100%,' + (40 + d[i]/255*30) + '%)';
-    ctx2d.fillRect(i * bw, canvas.height - h, bw - 1, h);
+  var sounding = !!(audioEl && !audioEl.paused);
+  var t = (now || 0) / 1000;
+  ctx2d.fillStyle = '#04040a';
+  ctx2d.fillRect(0, 0, W, H);
+  var gap = Math.max(1, Math.round(W / VIZ_BARS * 0.25)), bw = W / VIZ_BARS;
+  ctx2d.fillStyle = vizGrad || '#00ffd0';
+  for (i = 0; i < VIZ_BARS; i++) {
+    var target;
+    if (data) {
+      var lo = Math.floor(Math.pow(i / VIZ_BARS, 2) * (data.length - 1));
+      var hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / VIZ_BARS, 2) * (data.length - 1)));
+      var m = 0;
+      for (var k = lo; k < hi && k < data.length; k++) if (data[k] > m) m = data[k];
+      target = m / 255;
+    } else if (sounding) {
+      target = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(t * 3.1 + i * 0.55)) * (0.6 + 0.4 * Math.sin(t * 1.7 + i * 1.3));
+    } else {
+      target = 0.04;
+    }
+    vizSmooth[i] += (target - vizSmooth[i]) * (target > vizSmooth[i] ? 0.6 : 0.18);
+    var h = Math.max(2, vizSmooth[i] * H);
+    ctx2d.fillRect(Math.round(i * bw), H - h, Math.max(1, Math.round(bw - gap)), h);
   }
 }
-drawViz();
+requestAnimationFrame(drawViz);
 
 function setStatus(text, cls) {
   document.getElementById('status-text').textContent = text;
