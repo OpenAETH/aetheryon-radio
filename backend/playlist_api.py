@@ -38,6 +38,15 @@ def clean_chyron(raw) -> Optional[dict]:
     return out or None
 
 
+def _scale(duration_s: float, est_s=None) -> float:
+    """Razón duración real / estimada por el productor; fuera de (0.5, 2) o inválida se ignora (=1)."""
+    try:
+        ratio = duration_s / float(est_s)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 1.0
+    return ratio if 0.5 < ratio < 2.0 else 1.0
+
+
 def layout_segments(raw, duration_s: float, est_s=None) -> list:
     """Titulares de una edición con su momento en el audio: [{headline, deck, tag, at_s}].
     Cada segmento puede traer `at_s` (segundos) o un peso `w` / `text` para repartir la duración en proporción.
@@ -45,12 +54,7 @@ def layout_segments(raw, duration_s: float, est_s=None) -> list:
     del audio: así la deriva de una estimación no se acumula hacia el final de la edición."""
     if not isinstance(raw, list):
         return []
-    try:
-        ratio = duration_s / float(est_s)
-    except (TypeError, ValueError, ZeroDivisionError):
-        ratio = 1.0
-    if not 0.5 < ratio < 2.0:
-        ratio = 1.0
+    ratio = _scale(duration_s, est_s)
     items = []
     for r in raw[:12]:
         if not isinstance(r, dict) or not r.get("headline"):
@@ -68,6 +72,42 @@ def layout_segments(raw, duration_s: float, est_s=None) -> list:
         acc += w
         out.append(seg)
     return sorted(out, key=lambda s: s["at_s"])
+
+
+SPEAKER_RE = re.compile(r"^[a-z0-9_-]{1,24}$")
+MAX_TURNS = 60
+
+
+def layout_turns(raw, duration_s: float, est_s=None) -> list:
+    """Turnos de palabra de una conversación: [{speaker, at_s, emotion?}] (Visual Noti los consume vía /status).
+    Cada turno trae `at_s` (segundos) o un peso `w` / `text` para repartir la duración en proporción, igual que los
+    titulares. `speaker` es el id del conductor (cap, nova, ...) en minúsculas; `emotion` es opcional (oh, tos, ...)."""
+    if not isinstance(raw, list):
+        return []
+    ratio = _scale(duration_s, est_s)
+    items = []
+    for r in raw[:MAX_TURNS]:
+        if not isinstance(r, dict):
+            continue
+        speaker = str(r.get("speaker") or "").strip().lower()
+        if not SPEAKER_RE.match(speaker):
+            continue
+        turn = {"speaker": speaker}
+        emotion = str(r.get("emotion") or "").strip().lower()
+        if SPEAKER_RE.match(emotion):
+            turn["emotion"] = emotion
+        try:
+            w = max(float(r.get("w") or len(str(r.get("text") or "")) or 1), 1.0)
+        except (TypeError, ValueError):
+            w = 1.0
+        at = r.get("at_s")
+        items.append((turn, w, float(at) * ratio if isinstance(at, (int, float)) and not isinstance(at, bool) else None))
+    total, acc, out = sum(w for _, w, _ in items) or 1.0, 0.0, []
+    for turn, w, at in items:
+        turn["at_s"] = round(min(max(at if at is not None else duration_s * acc / total, 0.0), duration_s), 1)
+        acc += w
+        out.append(turn)
+    return sorted(out, key=lambda t: t["at_s"])
 
 logger = logging.getLogger("aetheryon-radio.playlist-api")
 
@@ -147,6 +187,8 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
                 raise HTTPException(413, f"audio demasiado largo (máx {int(cfg.max_duration_s)} s)")
             if metadata.get("segments"):
                 metadata["segments"] = layout_segments(metadata["segments"], duration, metadata.get("duration_s"))
+            if "turns" in metadata:
+                metadata["turns"] = layout_turns(metadata["turns"], duration, metadata.get("duration_s"))
             names = str(fmt.get("format_name", ""))
             ext = next((e for key, e in EXT_BY_FORMAT if key in names), None)
             if ext is None:
@@ -304,6 +346,7 @@ def make_router(store: PlaylistStore, engine_status: Callable[[], dict], request
                             priority=body.get("priority", "normal"), source=f"tts:{engine}",
                             ttl_s=cfg.default_ttl_s, metadata={"text_chars": len(text), "voice": voice,
                                       "chyron": clean_chyron(body.get("chyron")),
-                                      "segments": body.get("segments")})
+                                      "segments": body.get("segments"),
+                                      "turns": body.get("turns")})
 
     return router

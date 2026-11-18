@@ -24,12 +24,15 @@ from typing import Awaitable, Callable, List, Optional
 from playlist import PlaylistStore
 
 
-def chyron_of(item: dict) -> Optional[dict]:
-    """Faldón de la edición (+ sus titulares con tiempos) tal como lo publica /status."""
+def chyron_of(item: dict, pad_s: float = 0.0) -> Optional[dict]:
+    """Faldón de la edición (+ sus titulares y turnos de palabra con tiempos) tal como lo publica /status.
+    `pad_s`: silencio que el reproductor antepone al audio de una noticia; los `at_s` del productor cuentan desde el audio,
+    así que se corren ese tiempo para quedar sobre el reloj del stream (media_s)."""
     md = item.get("metadata") or {}
     out = dict(md.get("chyron") or {})
-    if md.get("segments"):
-        out["segments"] = md["segments"]
+    for key in ("segments", "turns"):
+        if md.get(key):
+            out[key] = [{**x, "at_s": round(float(x.get("at_s") or 0) + pad_s, 2)} for x in md[key]] if pad_s else md[key]
     return out or None
 
 logger = logging.getLogger("aetheryon-radio.playout")
@@ -338,7 +341,7 @@ class PlayoutEngine:
         self._current_news = item["id"]
         self._skip_id = None
         await self._play_file(buf, path, kind=item["kind"], title=item["title"] or item["external_id"],
-                              item_id=item["id"], chyron=chyron_of(item))
+                              item_id=item["id"], chyron=chyron_of(item, self.cfg.pad_ms / 1000.0))
 
     async def _play_file(self, buf: PCMQueue, path: Path, *, kind: str, title: str,
                          item_id: Optional[str] = None, chyron: Optional[dict] = None) -> bool:
